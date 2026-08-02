@@ -564,8 +564,8 @@ panel.Position = UDim2.new(0, 24, 0.5, -105)
 panel.BackgroundColor3 = STONE_TOP
 panel.BorderSizePixel = 0
 panel.Active = true
+panel.ClipsDescendants = true -- so the black title bar keeps the panel's rounded top corners
 panel.Parent = gui
--- sharp corners = blocky Minecraft slab (no UICorner)
 
 local panelGradient = Instance.new("UIGradient")
 panelGradient.Rotation = 90
@@ -593,8 +593,10 @@ panelScale.Parent = panel
 -- Header ------------------------------------------------------
 local header = Instance.new("Frame")
 header.Name = "Header"
-header.Size = UDim2.new(1, 0, 0, 40)
-header.BackgroundTransparency = 1
+header.Size = UDim2.new(1, 0, 0, 42)
+header.BackgroundColor3 = Color3.fromRGB(10, 10, 12) -- black title bar
+header.BackgroundTransparency = 0
+header.BorderSizePixel = 0
 header.ZIndex = 3
 header.Parent = panel
 
