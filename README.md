@@ -14,14 +14,21 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
 - **Normal Speed box** — speed used when you're not carrying anything.
 - **Carry Speed box** — speed used while carrying a brainrot.
 - Both clamped to 0–1000; type a number and press Enter.
-- **Presets** — 16 / 32 / 60 / 100 / 200 cobblestone buttons (set the Normal speed).
 - **Lever** — flip it to toggle the boost; the lamp, knob and border light up
-  red ("powered"). `RightShift` toggles it too.
+  red ("powered").
 - **Speed Counter** — a Minecraft-style slide switch (stone track + redstone-block
   knob that lights up and slides right when on). Turns the head readout on/off,
   independent of the boost.
-- The readout at the bottom shows the live mode (`Normal` / `Carrying`).
-- The panel is draggable.
+- The active speed row's label lights red so you can see the live mode.
+- The panel is draggable, and its position is remembered.
+
+## Auto-save
+
+Settings persist across rejoins automatically (executor filesystem — needs
+`writefile`/`readfile`/`isfile`; silently no-ops without them). Whenever you
+change a value it writes `dely_booster_test67.json`, and on load it applies the
+saved **normal speed, carry speed, boost on/off, speed-counter on/off, and panel
+position**. No save button — it just remembers.
 
 The blocky look uses `Enum.Font.Arcade` (the closest built-in to Minecraftia)
 and 2px pixel bevels — light top/left, dark bottom/right — on the slab and
@@ -47,7 +54,6 @@ All spring/`Back`-eased for a clean, snappy feel:
 - **Lever** does a squash-and-pop snap when it flips.
 - **Switch-on** flashes the whole redstone circuit (border, dust, separator)
   bright for a moment, plus a tiny panel "thunk".
-- **Preset buttons** scale up on hover, sink on press, spring back on release.
 - **Speed slots** pop and warm up when focused; the live slot pops on every
   pick-up / drop.
 - **Rows** lighten on hover.
@@ -61,9 +67,9 @@ brainrot:
   is set, or when `Humanoid.WalkSpeed` drops below `CARRY_WALKSPEED_MAX` (25)
   while still above 0 — which is how the game marks the carry state.
 - Each frame the loop detects pick-up / drop transitions, flips between
-  `getNormalSpeed()` and `getCarrySpeed()`, and updates the panel's mode
-  readout. No input from you is needed — walk into a steal and it switches,
-  drop it and it switches back.
+  `getNormalSpeed()` and `getCarrySpeed()`, and lights the active speed row's
+  label. No input from you is needed — walk into a steal and it switches, drop
+  it and it switches back.
 
 ## Head counter (Speed Counter toggle)
 

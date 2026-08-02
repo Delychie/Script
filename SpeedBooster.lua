@@ -1,4 +1,4 @@
---!strict
+--!nonstrict
 --[[
 	Dely Booster Test 67  (Redstone theme)
 	--------------------------------------
@@ -31,6 +31,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -43,8 +44,7 @@ local DEFAULT_NORMAL_SPEED = 60
 local DEFAULT_CARRY_SPEED = 27
 local MIN_SPEED = 0
 local MAX_SPEED = 1000
-local TOGGLE_KEY = Enum.KeyCode.RightShift
-local PRESETS = { 16, 32, 60, 100, 200 }
+local CONFIG_FILE = "dely_booster_test67.json" -- auto-saved settings
 
 -- Uploaded redstone-lever images: starts up (off), flips down when activated.
 local LEVER_ON_IMAGE = "rbxassetid://102532019315855"  -- lever down = ON
@@ -102,6 +102,42 @@ local COUNTER_BASE_Y = 2.6 -- studs above the head when nothing else is up there
 local BB_NORMAL = UDim2.fromOffset(150, 40)
 local BB_MID = UDim2.fromOffset(162, 44)
 local BB_BIG = UDim2.fromOffset(174, 48)
+
+-- Config persistence (executor filesystem)
+local savedGuiPos = nil -- {xScale, xOffset, yScale, yOffset}
+local suppressSave = false -- true while applying loaded values, so we don't re-save
+local canPersist = typeof(writefile) == "function"
+	and typeof(readfile) == "function"
+	and typeof(isfile) == "function"
+
+local function saveConfig()
+	if not canPersist or suppressSave then
+		return
+	end
+	local cfg = {
+		normalSpeed = normalSpeed,
+		carrySpeed = carrySpeed,
+		enabled = enabled,
+		counterEnabled = counterEnabled,
+		guiPos = savedGuiPos,
+	}
+	pcall(function()
+		writefile(CONFIG_FILE, HttpService:JSONEncode(cfg))
+	end)
+end
+
+local function loadConfig()
+	if not canPersist or not isfile(CONFIG_FILE) then
+		return nil
+	end
+	local ok, data = pcall(function()
+		return HttpService:JSONDecode(readfile(CONFIG_FILE))
+	end)
+	if ok and type(data) == "table" then
+		return data
+	end
+	return nil
+end
 
 --==============================================================
 -- Physics
@@ -483,8 +519,8 @@ gui.Parent = playerGui
 
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
-panel.Size = UDim2.fromOffset(250, 262)
-panel.Position = UDim2.new(0, 24, 0.5, -131)
+panel.Size = UDim2.fromOffset(250, 210)
+panel.Position = UDim2.new(0, 24, 0.5, -105)
 panel.BackgroundColor3 = STONE_TOP
 panel.BorderSizePixel = 0
 panel.Active = true
@@ -553,7 +589,7 @@ table.insert(redstoneLines, sep)
 -- reads like a real Minecraft window (outer slab + sunken content area).
 local body = Instance.new("Frame")
 body.Name = "Body"
-body.Size = UDim2.new(1, -20, 0, 188)
+body.Size = UDim2.new(1, -20, 0, 154)
 body.Position = UDim2.fromOffset(10, 48)
 body.BackgroundColor3 = Color3.fromRGB(20, 20, 22)
 body.BorderSizePixel = 0
@@ -628,25 +664,11 @@ end
 local normalBox, normalLabel, normalBoxScale = makeSpeedRow("Normal", "NORMAL SPEED", DEFAULT_NORMAL_SPEED, 52)
 local carryBox, carryLabel, carryBoxScale = makeSpeedRow("Carry", "CARRY SPEED", DEFAULT_CARRY_SPEED, 90)
 
--- Presets (set the Normal speed) ------------------------------
-local presetRow = Instance.new("Frame")
-presetRow.Name = "Presets"
-presetRow.Size = UDim2.new(1, -20, 0, 26)
-presetRow.Position = UDim2.fromOffset(10, 128)
-presetRow.BackgroundTransparency = 1
-presetRow.ZIndex = 2
-presetRow.Parent = panel
-
-local presetLayout = Instance.new("UIListLayout")
-presetLayout.FillDirection = Enum.FillDirection.Horizontal
-presetLayout.Padding = UDim.new(0, 6)
-presetLayout.Parent = presetRow
-
 -- Toggle row with a redstone lever -----------------------------
 local toggleRow = Instance.new("Frame")
 toggleRow.Name = "ToggleRow"
 toggleRow.Size = UDim2.new(1, -20, 0, 32)
-toggleRow.Position = UDim2.fromOffset(10, 160)
+toggleRow.Position = UDim2.fromOffset(10, 128)
 toggleRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 toggleRow.BorderSizePixel = 0
 toggleRow.ZIndex = 2
@@ -744,7 +766,7 @@ leverButton.Parent = toggleRow
 local counterRow = Instance.new("Frame")
 counterRow.Name = "CounterRow"
 counterRow.Size = UDim2.new(1, -20, 0, 32)
-counterRow.Position = UDim2.fromOffset(10, 198)
+counterRow.Position = UDim2.fromOffset(10, 166)
 counterRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 counterRow.BorderSizePixel = 0
 counterRow.ZIndex = 2
@@ -801,20 +823,6 @@ counterButton.AutoButtonColor = false
 counterButton.ZIndex = 6
 counterButton.Parent = counterRow
 
--- Mode readout / hint -----------------------------------------
-local hint = Instance.new("TextLabel")
-hint.Name = "Hint"
-hint.Size = UDim2.new(1, -20, 0, 16)
-hint.Position = UDim2.fromOffset(10, 238)
-hint.BackgroundTransparency = 1
-hint.Text = "RIGHTSHIFT TO TOGGLE"
-hint.Font = FONT
-hint.TextSize = 13
-hint.TextColor3 = SUBTEXT
-hint.TextXAlignment = Enum.TextXAlignment.Center
-hint.ZIndex = 3
-hint.Parent = panel
-
 -- Dragging (custom, since Frame.Draggable is deprecated) ------
 do
 	local dragging, dragStart, startPos = false, nil, nil
@@ -827,6 +835,9 @@ do
 			input.Changed:Connect(function()
 				if input.UserInputState == Enum.UserInputState.End then
 					dragging = false
+					local p = panel.Position
+					savedGuiPos = { p.X.Scale, p.X.Offset, p.Y.Scale, p.Y.Offset }
+					saveConfig()
 				end
 			end)
 		end
@@ -849,11 +860,13 @@ end
 local function setNormalSpeed(value: number)
 	normalSpeed = math.clamp(value, MIN_SPEED, MAX_SPEED)
 	normalBox.Text = tostring(normalSpeed)
+	saveConfig()
 end
 
 local function setCarrySpeed(value: number)
 	carrySpeed = math.clamp(value, MIN_SPEED, MAX_SPEED)
 	carryBox.Text = tostring(carrySpeed)
+	saveConfig()
 end
 
 -- Flip the lever + warm the title when powered (dust pulses via the loop).
@@ -889,17 +902,6 @@ local function updateMode()
 	-- energise the live slot with a faint warm-red fill
 	normalBox.BackgroundColor3 = normalActive and Color3.fromRGB(34, 16, 16) or SLOT
 	carryBox.BackgroundColor3 = carryActive and Color3.fromRGB(34, 16, 16) or SLOT
-
-	if not enabled then
-		hint.Text = "RIGHTSHIFT TO TOGGLE"
-		hint.TextColor3 = SUBTEXT
-	elseif carrying then
-		hint.Text = string.format("CARRYING  -  %d", carrySpeed)
-		hint.TextColor3 = RED_BRIGHT
-	else
-		hint.Text = string.format("NORMAL  -  %d", normalSpeed)
-		hint.TextColor3 = Color3.fromRGB(120, 255, 165)
-	end
 end
 
 local function setEnabled(value: boolean)
@@ -916,6 +918,7 @@ local function setEnabled(value: boolean)
 		end
 	end
 	updateMode()
+	saveConfig()
 end
 
 -- Speed Counter toggle: shows/hides the head readout (independent of the boost).
@@ -938,6 +941,7 @@ local function setCounterEnabled(value: boolean)
 	if counterGui then
 		counterGui.Enabled = value
 	end
+	saveConfig()
 end
 
 -- Validated commit, shared by both speed boxes.
@@ -955,52 +959,6 @@ end
 wireBox(normalBox, setNormalSpeed, getNormalSpeed)
 wireBox(carryBox, setCarrySpeed, getCarrySpeed)
 
-for _, preset in PRESETS do
-	local button = Instance.new("TextButton")
-	button.Name = "Preset" .. preset
-	button.Size = UDim2.new(0, 38, 1, 0)
-	button.BackgroundColor3 = Color3.fromRGB(70, 70, 76) -- cobblestone
-	button.BorderSizePixel = 0
-	button.AutoButtonColor = false
-	button.Text = tostring(preset)
-	button.Font = FONT
-	button.TextSize = 14
-	button.TextColor3 = Color3.fromRGB(225, 225, 230)
-	button.ZIndex = 3
-	button.Parent = presetRow
-	addBevel(button, Color3.fromRGB(104, 104, 112), Color3.fromRGB(34, 34, 38))
-	-- UIScale for hover/press so animating never shifts the row layout
-	local btnScale = Instance.new("UIScale")
-	btnScale.Parent = button
-
-	button.MouseEnter:Connect(function()
-		TweenService:Create(button, TweenInfo.new(0.1), { BackgroundColor3 = RED_DIM }):Play()
-		TweenService:Create(btnScale, TweenInfo.new(0.1, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.1 }):Play()
-	end)
-	button.MouseLeave:Connect(function()
-		TweenService:Create(button, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(70, 70, 76) }):Play()
-		TweenService:Create(btnScale, TweenInfo.new(0.1), { Scale = 1 }):Play()
-	end)
-	-- pressed-block feel: sink on press, spring back on release
-	button.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-			TweenService:Create(btnScale, TweenInfo.new(0.06), { Scale = 0.85 }):Play()
-		end
-	end)
-	button.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-			TweenService:Create(btnScale, TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
-		end
-	end)
-	button.Activated:Connect(function()
-		setNormalSpeed(preset) -- presets set the Normal speed
-		punch(normalBoxScale, 1.14) -- pop the Normal slot it just filled
-		updateMode()
-	end)
-end
-
 leverButton.Activated:Connect(function()
 	setEnabled(not enabled)
 end)
@@ -1009,21 +967,10 @@ counterButton.Activated:Connect(function()
 	setCounterEnabled(not counterEnabled)
 end)
 
-UserInputService.InputBegan:Connect(function(input, processed)
-	if processed then
-		return
-	end
-	if input.KeyCode == TOGGLE_KEY then
-		setEnabled(not enabled)
-	end
-end)
-
 --==============================================================
 -- Boot
 --==============================================================
 
-setNormalSpeed(DEFAULT_NORMAL_SPEED)
-setCarrySpeed(DEFAULT_CARRY_SPEED)
 -- movement loop calls this on pick-up / drop: refresh the readout + pop the
 -- slot that just became active.
 onCarryChanged = function()
@@ -1032,8 +979,26 @@ onCarryChanged = function()
 		punch(carrying and carryBoxScale or normalBoxScale, 1.15)
 	end
 end
+
+-- apply defaults, then load any saved config over the top (no re-saving while we do)
+suppressSave = true
+setNormalSpeed(DEFAULT_NORMAL_SPEED)
+setCarrySpeed(DEFAULT_CARRY_SPEED)
 setEnabled(false)
 setCounterEnabled(false)
+
+local savedCfg = loadConfig()
+if savedCfg then
+	if type(savedCfg.normalSpeed) == "number" then setNormalSpeed(savedCfg.normalSpeed) end
+	if type(savedCfg.carrySpeed) == "number" then setCarrySpeed(savedCfg.carrySpeed) end
+	if savedCfg.counterEnabled ~= nil then setCounterEnabled(savedCfg.counterEnabled == true) end
+	if savedCfg.enabled ~= nil then setEnabled(savedCfg.enabled == true) end
+	if type(savedCfg.guiPos) == "table" and #savedCfg.guiPos >= 4 then
+		savedGuiPos = savedCfg.guiPos
+		panel.Position = UDim2.new(savedCfg.guiPos[1], savedCfg.guiPos[2], savedCfg.guiPos[3], savedCfg.guiPos[4])
+	end
+end
+suppressSave = false
 
 -- intro: grow the panel in
 punch(panelScale, 0.8)
