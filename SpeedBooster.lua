@@ -1,31 +1,10 @@
 --!nonstrict
---[[
-	Dely Booster Test 67  (Redstone theme)
-	--------------------------------------
-	LocalScript. Drop it in StarterPlayer > StarterPlayerScripts (or run it from
-	a client-side script runner).
-
-	How it works:
-	  * An Attachment is created on the HumanoidRootPart.
-	  * A LinearVelocity is bound to that Attachment in Plane mode, with the
-	    plane spanned by the world X and Z axes. Because the constraint only
-	    solves inside that plane, no force is ever applied on Y, so gravity,
-	    jumping and falling behave exactly as normal.
-	  * Every frame we read Humanoid.MoveDirection and push it into
-	    PlaneVelocity as Vector2.new(MoveDirection.X * spd, MoveDirection.Z * spd),
-	    where `spd` is the Normal or Carry speed depending on whether a brainrot
-	    is being carried. Nothing ever writes to HumanoidRootPart.Velocity.
-	  * When there is no input the constraint is disabled so the character can
-	    slow down, get knocked around, and be moved by other physics normally.
-
-	Normal vs Carry: while you hold a brainrot the game slows your WalkSpeed and
-	sets a "Stealing" attribute. isCarryingBrainrot() reads that, and the mover
-	switches from Normal Speed to Carry Speed automatically (and back on drop).
-
-	Panel: a deepslate slab with pixel bevels and a redstone-dust border that
-	only powers on (glows red) while the booster is enabled. A lever toggles it;
-	RightShift does too. Draggable.
-]]
+-- dely booster test 67
+-- moves you with a LinearVelocity on the HRP (plane mode, X/Z only) instead of
+-- touching Velocity, so gravity/jumps stay normal. two speeds: normal, and a
+-- slower one for when you're carrying a brainrot (detected off WalkSpeed +
+-- the Stealing attribute). redstone panel + a head speed counter on top.
+-- lever/dust image ids are in the config block. LocalScript / executor.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -85,7 +64,7 @@ local SURGE_SEQ = ColorSequence.new({
 })
 local TEXT        = Color3.fromRGB(228, 228, 232)
 local SUBTEXT     = Color3.fromRGB(150, 150, 156)
-local FONT        = Enum.Font.Arcade -- closest built-in to the Minecraft look
+local FONT        = Enum.Font.Arcade -- blocky, fits the mc vibe
 
 --==============================================================
 -- State
@@ -791,7 +770,7 @@ leverBase.Parent = toggleRow
 round(leverBase, 4)
 edgeStroke(leverBase, Color3.fromRGB(24, 24, 28), 1, 0.2)
 
--- lever handle (pivots at the base) — starts in the OFF position
+-- lever handle, pivots at the base, sits in the OFF position to start
 local handle = Instance.new("Frame")
 handle.Name = "Handle"
 handle.AnchorPoint = Vector2.new(0.5, 1)
@@ -804,7 +783,7 @@ handle.ZIndex = 4
 handle.Parent = leverBase
 round(handle, 3)
 
--- knob at the top of the handle — the redstone tip that lights up when ON
+-- knob on top of the handle, the redstone tip that lights up when ON
 local knob = Instance.new("Frame")
 knob.Name = "Knob"
 knob.AnchorPoint = Vector2.new(0.5, 0)
@@ -910,7 +889,7 @@ counterButton.AutoButtonColor = false
 counterButton.ZIndex = 6
 counterButton.Parent = counterRow
 
--- Dragging (custom, since Frame.Draggable is deprecated) ------
+-- panel dragging (Frame.Draggable is dead so do it by hand)
 do
 	local dragging, dragStart, startPos = false, nil, nil
 	panel.InputBegan:Connect(function(input)
