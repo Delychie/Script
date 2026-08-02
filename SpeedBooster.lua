@@ -345,12 +345,21 @@ local function addBevel(frame: GuiObject, hi: Color3, lo: Color3)
 	edge(UDim2.new(0, 2, 1, 0), UDim2.new(1, -2, 0, 0), lo) -- right
 end
 
+-- Snappy scale pop: set to `from`, spring back to 1. Used all over for feedback.
+local function punch(scale: UIScale, from: number)
+	scale.Scale = from
+	TweenService:Create(scale, TweenInfo.new(0.24, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Scale = 1,
+	}):Play()
+end
+
 -- Redstone dust border: dim when unpowered, glows/pulses red while the booster
 -- is enabled (the whole "circuit" powers on together). Frames added to
 -- redstoneLines get tinted the same way (used by the separator).
 local redstoneStrokes: { UIStroke } = {}
 local redstoneLines: { Frame } = {}
 local redstoneImages: { ImageLabel } = {} -- tinted via ImageColor3
+local powerSurge = 0 -- brief flash to full brightness when the booster is switched on
 
 local function addRedstoneStroke(frame: GuiObject, thickness: number?)
 	local stroke = Instance.new("UIStroke")
@@ -366,8 +375,10 @@ do
 	local t = 0
 	RunService.Heartbeat:Connect(function(dt)
 		t += dt
+		powerSurge = math.max(0, powerSurge - dt * 2.5) -- decays after a switch-on
 		-- Only glow while powered (enabled); otherwise sit at the dim, unpowered red.
-		local glow = enabled and (0.5 + 0.5 * math.sin(t * 4)) or 0
+		-- The surge briefly overrides the sine so a flick flashes bright.
+		local glow = enabled and math.max(0.5 + 0.5 * math.sin(t * 4), powerSurge) or 0
 		local col = RED_DIM:Lerp(RED_BRIGHT, glow)
 		for i = #redstoneStrokes, 1, -1 do
 			local s = redstoneStrokes[i]
@@ -411,6 +422,9 @@ panelGradient.Parent = panel
 
 addBevel(panel, BEVEL_HI, BEVEL_LO)  -- raised stone slab
 addRedstoneStroke(panel, 2.5)        -- powered redstone dust outline
+
+local panelScale = Instance.new("UIScale")
+panelScale.Parent = panel
 
 -- Header ------------------------------------------------------
 local header = Instance.new("Frame")
@@ -514,12 +528,29 @@ local function makeSpeedRow(name: string, labelText: string, defaultValue: numbe
 	box.ZIndex = 3
 	box.Parent = row
 	addBevel(box, BEVEL_LO, BEVEL_HI) -- swapped = pressed-in slot
+	local boxScale = Instance.new("UIScale")
+	boxScale.Parent = box
 
-	return box, label, row
+	-- row hover: gently lighten the stone
+	local base = row.BackgroundColor3
+	row.MouseEnter:Connect(function()
+		TweenService:Create(row, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(46, 46, 52) }):Play()
+	end)
+	row.MouseLeave:Connect(function()
+		TweenService:Create(row, TweenInfo.new(0.12), { BackgroundColor3 = base }):Play()
+	end)
+
+	-- slot focus: pop + warm the fill (restore is handled by updateMode on blur)
+	box.Focused:Connect(function()
+		punch(boxScale, 1.14)
+		TweenService:Create(box, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(42, 20, 20) }):Play()
+	end)
+
+	return box, label, boxScale
 end
 
-local normalBox, normalLabel = makeSpeedRow("Normal", "NORMAL SPEED", DEFAULT_NORMAL_SPEED, 52)
-local carryBox, carryLabel = makeSpeedRow("Carry", "CARRY SPEED", DEFAULT_CARRY_SPEED, 90)
+local normalBox, normalLabel, normalBoxScale = makeSpeedRow("Normal", "NORMAL SPEED", DEFAULT_NORMAL_SPEED, 52)
+local carryBox, carryLabel, carryBoxScale = makeSpeedRow("Carry", "CARRY SPEED", DEFAULT_CARRY_SPEED, 90)
 
 -- Presets (set the Normal speed) ------------------------------
 local presetRow = Instance.new("Frame")
@@ -545,6 +576,12 @@ toggleRow.BorderSizePixel = 0
 toggleRow.ZIndex = 2
 toggleRow.Parent = panel
 addBevel(toggleRow, BEVEL_HI, BEVEL_LO)
+toggleRow.MouseEnter:Connect(function()
+	TweenService:Create(toggleRow, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(46, 46, 52) }):Play()
+end)
+toggleRow.MouseLeave:Connect(function()
+	TweenService:Create(toggleRow, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(34, 34, 38) }):Play()
+end)
 
 local toggleLabel = Instance.new("TextLabel")
 toggleLabel.Name = "ToggleLabel"
@@ -599,6 +636,7 @@ addBevel(knob, Color3.fromRGB(150, 60, 60), Color3.fromRGB(40, 12, 12))
 -- If you uploaded a lever image, use it instead of the drawn one.
 local useLeverImage = LEVER_ON_IMAGE ~= ""
 local leverImage: ImageLabel? = nil
+local leverImageScale: UIScale? = nil
 if useLeverImage then
 	leverBase.Visible = false -- hide the drawn base/handle/knob
 	local img = Instance.new("ImageLabel")
@@ -611,7 +649,10 @@ if useLeverImage then
 	img.Image = (LEVER_OFF_IMAGE ~= "" and LEVER_OFF_IMAGE) or LEVER_ON_IMAGE
 	img.ZIndex = 4
 	img.Parent = toggleRow
+	local imgScale = Instance.new("UIScale")
+	imgScale.Parent = img
 	leverImage = img
+	leverImageScale = imgScale
 end
 
 -- whole row is clickable
@@ -683,6 +724,10 @@ local function animLever(on: boolean)
 	if useLeverImage and leverImage then
 		leverImage.Image = on and LEVER_ON_IMAGE
 			or ((LEVER_OFF_IMAGE ~= "" and LEVER_OFF_IMAGE) or LEVER_ON_IMAGE)
+		-- flip snap: squash into the swap, spring back
+		if leverImageScale then
+			punch(leverImageScale, 0.7)
+		end
 	else
 		TweenService:Create(handle, TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 			Rotation = on and -38 or 38,
@@ -724,7 +769,10 @@ local function setEnabled(value: boolean)
 	enabled = value
 	animLever(enabled)
 
-	if not enabled then
+	if enabled then
+		powerSurge = 1        -- flash the whole circuit bright
+		punch(panelScale, 1.03) -- little power "thunk"
+	else
 		if linearVelocity then
 			linearVelocity.Enabled = false
 			linearVelocity.PlaneVelocity = Vector2.zero
@@ -765,29 +813,34 @@ for _, preset in PRESETS do
 	button.ZIndex = 3
 	button.Parent = presetRow
 	addBevel(button, Color3.fromRGB(104, 104, 112), Color3.fromRGB(34, 34, 38))
+	-- UIScale for hover/press so animating never shifts the row layout
+	local btnScale = Instance.new("UIScale")
+	btnScale.Parent = button
 
 	button.MouseEnter:Connect(function()
 		TweenService:Create(button, TweenInfo.new(0.1), { BackgroundColor3 = RED_DIM }):Play()
+		TweenService:Create(btnScale, TweenInfo.new(0.1, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.1 }):Play()
 	end)
 	button.MouseLeave:Connect(function()
 		TweenService:Create(button, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(70, 70, 76) }):Play()
+		TweenService:Create(btnScale, TweenInfo.new(0.1), { Scale = 1 }):Play()
 	end)
-	-- pressed-block feel: sink on press, pop back on release
-	local restSize = button.Size
+	-- pressed-block feel: sink on press, spring back on release
 	button.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
-			TweenService:Create(button, TweenInfo.new(0.06), { Size = UDim2.new(0, 34, 1, -4) }):Play()
+			TweenService:Create(btnScale, TweenInfo.new(0.06), { Scale = 0.85 }):Play()
 		end
 	end)
 	button.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
-			TweenService:Create(button, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = restSize }):Play()
+			TweenService:Create(btnScale, TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 		end
 	end)
 	button.Activated:Connect(function()
 		setNormalSpeed(preset) -- presets set the Normal speed
+		punch(normalBoxScale, 1.14) -- pop the Normal slot it just filled
 		updateMode()
 	end)
 end
@@ -811,8 +864,18 @@ end)
 
 setNormalSpeed(DEFAULT_NORMAL_SPEED)
 setCarrySpeed(DEFAULT_CARRY_SPEED)
-onCarryChanged = updateMode -- the movement loop calls this on pick-up / drop
+-- movement loop calls this on pick-up / drop: refresh the readout + pop the
+-- slot that just became active.
+onCarryChanged = function()
+	updateMode()
+	if enabled then
+		punch(carrying and carryBoxScale or normalBoxScale, 1.15)
+	end
+end
 setEnabled(false)
+
+-- intro: grow the panel in
+punch(panelScale, 0.8)
 
 if player.Character then
 	onCharacterAdded(player.Character)

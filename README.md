@@ -36,6 +36,19 @@ The panel uses uploaded Minecraft textures, set at the top of the script:
 
 Blank out `LEVER_ON_IMAGE` to fall back to the drawn (native) lever.
 
+## Animations
+
+All spring/`Back`-eased for a clean, snappy feel:
+
+- **Panel** grows in on load.
+- **Lever** does a squash-and-pop snap when it flips.
+- **Switch-on** flashes the whole redstone circuit (border, dust, separator)
+  bright for a moment, plus a tiny panel "thunk".
+- **Preset buttons** scale up on hover, sink on press, spring back on release.
+- **Speed slots** pop and warm up when focused; the live slot pops on every
+  pick-up / drop.
+- **Rows** lighten on hover.
+
 ## Normal vs Carry speed
 
 The mover picks a speed automatically based on whether you're holding a
