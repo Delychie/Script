@@ -14,6 +14,15 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
 - **ON / OFF button** — toggles the boost. `RightShift` does the same.
 - The panel is draggable.
 
+## Head counter
+
+While the boost is ON, a `BillboardGui` floats above your head showing your
+real horizontal speed in studs/sec — measured from
+`HumanoidRootPart.AssemblyLinearVelocity` with the Y component dropped, so
+falling never inflates it. It turns green while the constraint is actively
+pushing and grey when you are coasting, and hides entirely when the boost is
+OFF. It is created client-side, so no other player sees it.
+
 ## How it moves the character
 
 No `HumanoidRootPart.Velocity` writes anywhere.

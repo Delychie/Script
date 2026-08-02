@@ -48,9 +48,13 @@ local speed = DEFAULT_SPEED
 local character: Model? = nil
 local humanoid: Humanoid? = nil
 local rootPart: BasePart? = nil
+local head: BasePart? = nil
 
 local attachment: Attachment? = nil
 local linearVelocity: LinearVelocity? = nil
+
+local counterGui: BillboardGui? = nil
+local counterLabel: TextLabel? = nil
 
 --==============================================================
 -- Physics
@@ -98,18 +102,101 @@ local function buildMover()
 	linearVelocity = newVelocity
 end
 
+--==============================================================
+-- Head counter
+--==============================================================
+
+local function teardownCounter()
+	if counterGui then
+		counterGui:Destroy()
+		counterGui = nil
+		counterLabel = nil
+	end
+end
+
+-- Floating readout above the head. Created on the client only, so nobody else
+-- sees it.
+local function buildCounter()
+	teardownCounter()
+	if not head then
+		return
+	end
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "SpeedBoosterCounter"
+	billboard.Adornee = head
+	billboard.Size = UDim2.fromOffset(150, 44)
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, 2.4, 0)
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = 200
+	billboard.Enabled = false
+	billboard.Parent = head
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Readout"
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = "0"
+	label.Font = Enum.Font.GothamBold
+	label.TextScaled = true
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+	label.TextStrokeTransparency = 0.35
+	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	label.Parent = billboard
+
+	counterGui = billboard
+	counterLabel = label
+end
+
 local function onCharacterAdded(newCharacter: Model)
 	character = newCharacter
 	humanoid = newCharacter:WaitForChild("Humanoid") :: Humanoid
 	rootPart = newCharacter:WaitForChild("HumanoidRootPart") :: BasePart
+	head = newCharacter:WaitForChild("Head") :: BasePart
 	buildMover()
+	buildCounter()
 end
 
 --==============================================================
 -- Movement loop
 --==============================================================
 
+-- Actual horizontal speed the character is travelling at, in studs/sec. Y is
+-- dropped so falling never inflates the number.
+local function measureHorizontalSpeed(): number
+	if not rootPart then
+		return 0
+	end
+	local assemblyVelocity = rootPart.AssemblyLinearVelocity
+	return Vector3.new(assemblyVelocity.X, 0, assemblyVelocity.Z).Magnitude
+end
+
+local function updateCounter()
+	local billboard = counterGui
+	local label = counterLabel
+	if not billboard or not label or not billboard.Parent then
+		return
+	end
+
+	if not enabled then
+		billboard.Enabled = false
+		return
+	end
+
+	local current = measureHorizontalSpeed()
+	label.Text = string.format("%d", math.round(current))
+
+	-- Green while the mover is actually pushing, dimmed when idle.
+	local pushing = linearVelocity ~= nil and linearVelocity.Enabled
+	label.TextColor3 = pushing and Color3.fromRGB(120, 255, 165)
+		or Color3.fromRGB(225, 225, 235)
+
+	billboard.Enabled = true
+end
+
 RunService.Heartbeat:Connect(function()
+	updateCounter()
+
 	local velocity = linearVelocity
 	if not velocity or not velocity.Parent then
 		return
@@ -248,9 +335,14 @@ local function setEnabled(value: boolean)
 	toggleButton.BackgroundColor3 = enabled and Color3.fromRGB(46, 150, 92)
 		or Color3.fromRGB(58, 58, 66)
 
-	if not enabled and linearVelocity then
-		linearVelocity.Enabled = false
-		linearVelocity.PlaneVelocity = Vector2.zero
+	if not enabled then
+		if linearVelocity then
+			linearVelocity.Enabled = false
+			linearVelocity.PlaneVelocity = Vector2.zero
+		end
+		if counterGui then
+			counterGui.Enabled = false
+		end
 	end
 end
 
