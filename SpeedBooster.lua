@@ -483,6 +483,23 @@ local function punch(scale: UIScale, from: number)
 	}):Play()
 end
 
+-- Damped rotational shake, eased out. Used on load for the redstone dust + lever.
+local function shake(gui: GuiObject?, amplitude: number, duration: number)
+	if not gui then
+		return
+	end
+	task.spawn(function()
+		local t = 0
+		while t < duration and gui.Parent do
+			local dt = RunService.Heartbeat:Wait()
+			t += dt
+			local decay = 1 - (t / duration)
+			gui.Rotation = math.sin(t * 36) * amplitude * decay * decay
+		end
+		gui.Rotation = 0
+	end)
+end
+
 -- Redstone dust border: dim when unpowered, glows/pulses red while the booster
 -- is enabled (the whole "circuit" powers on together). Frames added to
 -- redstoneLines get tinted the same way (used by the separator).
@@ -584,8 +601,9 @@ header.Parent = panel
 -- redstone-dust indicator: dim when unpowered, glows/pulses red with the circuit
 local dust = Instance.new("ImageLabel")
 dust.Name = "RedstoneDust"
+dust.AnchorPoint = Vector2.new(0.5, 0.5) -- center pivot so the load shake looks right
 dust.Size = UDim2.fromOffset(20, 20)
-dust.Position = UDim2.new(0, 9, 0.5, -10)
+dust.Position = UDim2.new(0, 19, 0.5, 0)
 dust.BackgroundTransparency = 1
 dust.Image = DUST_IMAGE
 dust.ScaleType = Enum.ScaleType.Fit
@@ -1042,17 +1060,11 @@ if savedCfg then
 end
 suppressSave = false
 
--- intro: grow in + a smooth damped shake, like it's powering up
+-- intro: grow the panel in, then shake the redstone dust + lever as it powers up
 punch(panelScale, 0.8)
-task.spawn(function()
-	local t = 0
-	while t < 0.75 do
-		local dt = RunService.Heartbeat:Wait()
-		t += dt
-		local decay = 1 - (t / 0.75)
-		panel.Rotation = math.sin(t * 32) * 6 * decay * decay -- eases out smoothly
-	end
-	panel.Rotation = 0
+task.delay(0.12, function()
+	shake(dust, 16, 0.6)
+	shake(leverImage, 12, 0.6)
 end)
 
 if player.Character then

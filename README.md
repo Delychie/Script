@@ -50,7 +50,8 @@ Blank out `LEVER_ON_IMAGE` to fall back to the drawn (native) lever.
 
 All spring/`Back`-eased for a clean, snappy feel:
 
-- **Panel** grows in and then does a smooth damped shake as it powers up.
+- **Panel** grows in on load; the **redstone dust** and the **lever** then do a
+  smooth damped shake as it powers up (the panel itself no longer rotates).
 - **Border** is a thick `UIStroke` that overflows the panel edge. Off, it's a
   still **reddish-black**. On, a `UIGradient` surge (reddish-black → crimson →
   red → scarlet, endpoints matched) rotates so the colour **flows** around it,
