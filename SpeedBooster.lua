@@ -511,7 +511,7 @@ local powerSurge = 0 -- brief flash to full brightness when the booster is switc
 -- crimson/scarlet gradient surge when powered. Assigned when the panel is built.
 local panelBorder: UIStroke? = nil
 local panelBorderGrad: UIGradient? = nil
-local PANEL_BORDER_BASE = 6 -- thick, so it overflows the panel edge ("out of bounds")
+local PANEL_BORDER_BASE = 3 -- overflows the panel edge a little
 
 do
 	local t = 0
@@ -537,7 +537,7 @@ do
 				panelBorderGrad.Enabled = true
 				panelBorder.Color = Color3.fromRGB(255, 255, 255) -- let the gradient show
 				panelBorderGrad.Rotation = (panelBorderGrad.Rotation + dt * 100) % 360 -- flow
-				panelBorder.Thickness = PANEL_BORDER_BASE + math.sin(t * 6) * 1.5 + powerSurge * 4
+				panelBorder.Thickness = PANEL_BORDER_BASE + math.sin(t * 6) * 0.8 + powerSurge * 2
 			else
 				panelBorderGrad.Enabled = false
 				panelBorder.Color = REDDISH_BLACK
