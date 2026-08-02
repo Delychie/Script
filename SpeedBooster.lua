@@ -65,9 +65,24 @@ local STONE_BOT   = Color3.fromRGB(24, 24, 26)   -- darker toward the bottom
 local SLOT        = Color3.fromRGB(18, 18, 20)   -- inset slot fill
 local BEVEL_HI    = Color3.fromRGB(78, 78, 84)   -- light pixel edge (top/left)
 local BEVEL_LO    = Color3.fromRGB(10, 10, 12)   -- dark pixel edge (bottom/right)
-local RED_DIM     = Color3.fromRGB(92, 14, 14)   -- unpowered redstone dust
+local REDDISH_BLACK = Color3.fromRGB(40, 7, 7)    -- unpowered (border sits here)
+local CRIMSON       = Color3.fromRGB(178, 20, 48)
+local RED           = Color3.fromRGB(235, 22, 22)
+local SCARLET       = Color3.fromRGB(255, 62, 28)
+local RED_DIM     = REDDISH_BLACK                 -- unpowered redstone dust/border
 local RED_BRIGHT  = Color3.fromRGB(255, 48, 48)  -- powered redstone dust
 local RED_MID     = Color3.fromRGB(200, 30, 30)
+
+-- Powered border surge: flows through reddish-black -> crimson -> red -> scarlet
+-- and back. Endpoints match so rotating it loops seamlessly.
+local SURGE_SEQ = ColorSequence.new({
+	ColorSequenceKeypoint.new(0.00, REDDISH_BLACK),
+	ColorSequenceKeypoint.new(0.25, CRIMSON),
+	ColorSequenceKeypoint.new(0.50, RED),
+	ColorSequenceKeypoint.new(0.70, SCARLET),
+	ColorSequenceKeypoint.new(0.86, CRIMSON),
+	ColorSequenceKeypoint.new(1.00, REDDISH_BLACK),
+})
 local TEXT        = Color3.fromRGB(228, 228, 232)
 local SUBTEXT     = Color3.fromRGB(150, 150, 156)
 local FONT        = Enum.Font.Arcade -- closest built-in to the Minecraft look
@@ -471,20 +486,15 @@ end
 -- Redstone dust border: dim when unpowered, glows/pulses red while the booster
 -- is enabled (the whole "circuit" powers on together). Frames added to
 -- redstoneLines get tinted the same way (used by the separator).
-local redstoneStrokes: { UIStroke } = {}
 local redstoneLines: { Frame } = {}
 local redstoneImages: { ImageLabel } = {} -- tinted via ImageColor3
 local powerSurge = 0 -- brief flash to full brightness when the booster is switched on
 
-local function addRedstoneStroke(frame: GuiObject, thickness: number?)
-	local stroke = Instance.new("UIStroke")
-	stroke.Thickness = thickness or 2
-	stroke.Color = RED_DIM
-	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	stroke.Parent = frame
-	table.insert(redstoneStrokes, stroke)
-	return stroke
-end
+-- The big panel border: reddish-black + still when unpowered, a flowing
+-- crimson/scarlet gradient surge when powered. Assigned when the panel is built.
+local panelBorder: UIStroke? = nil
+local panelBorderGrad: UIGradient? = nil
+local PANEL_BORDER_BASE = 6 -- thick, so it overflows the panel edge ("out of bounds")
 
 do
 	local t = 0
@@ -495,10 +505,6 @@ do
 		-- The surge briefly overrides the sine so a flick flashes bright.
 		local glow = enabled and math.max(0.5 + 0.5 * math.sin(t * 4), powerSurge) or 0
 		local col = RED_DIM:Lerp(RED_BRIGHT, glow)
-		for i = #redstoneStrokes, 1, -1 do
-			local s = redstoneStrokes[i]
-			if s.Parent then s.Color = col else table.remove(redstoneStrokes, i) end
-		end
 		for i = #redstoneLines, 1, -1 do
 			local l = redstoneLines[i]
 			if l.Parent then l.BackgroundColor3 = col else table.remove(redstoneLines, i) end
@@ -506,6 +512,20 @@ do
 		for i = #redstoneImages, 1, -1 do
 			local img = redstoneImages[i]
 			if img.Parent then img.ImageColor3 = col else table.remove(redstoneImages, i) end
+		end
+
+		-- panel border: powered = flowing gradient surge; off = still reddish-black
+		if panelBorder and panelBorderGrad then
+			if enabled then
+				panelBorderGrad.Enabled = true
+				panelBorder.Color = Color3.fromRGB(255, 255, 255) -- let the gradient show
+				panelBorderGrad.Rotation = (panelBorderGrad.Rotation + dt * 100) % 360 -- flow
+				panelBorder.Thickness = PANEL_BORDER_BASE + math.sin(t * 6) * 1.5 + powerSurge * 4
+			else
+				panelBorderGrad.Enabled = false
+				panelBorder.Color = REDDISH_BLACK
+				panelBorder.Thickness = PANEL_BORDER_BASE
+			end
 		end
 	end)
 end
@@ -536,7 +556,19 @@ panelGradient.Color = ColorSequence.new(STONE_TOP, STONE_BOT)
 panelGradient.Parent = panel
 
 round(panel, 12)                     -- smooth slab corners
-addRedstoneStroke(panel, 2.5)        -- powered redstone dust outline (follows the corner)
+
+-- Big redstone border that overflows the panel edge. Reddish-black + still when
+-- off; a flowing crimson/scarlet gradient surge when powered (driven above).
+panelBorder = Instance.new("UIStroke")
+panelBorder.Thickness = PANEL_BORDER_BASE
+panelBorder.Color = REDDISH_BLACK
+panelBorder.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+panelBorder.LineJoinMode = Enum.LineJoinMode.Round
+panelBorder.Parent = panel
+panelBorderGrad = Instance.new("UIGradient")
+panelBorderGrad.Color = SURGE_SEQ
+panelBorderGrad.Enabled = false
+panelBorderGrad.Parent = panelBorder
 
 local panelScale = Instance.new("UIScale")
 panelScale.Parent = panel
@@ -1010,8 +1042,18 @@ if savedCfg then
 end
 suppressSave = false
 
--- intro: grow the panel in
+-- intro: grow in + a smooth damped shake, like it's powering up
 punch(panelScale, 0.8)
+task.spawn(function()
+	local t = 0
+	while t < 0.75 do
+		local dt = RunService.Heartbeat:Wait()
+		t += dt
+		local decay = 1 - (t / 0.75)
+		panel.Rotation = math.sin(t * 32) * 6 * decay * decay -- eases out smoothly
+	end
+	panel.Rotation = 0
+end)
 
 if player.Character then
 	onCharacterAdded(player.Character)

@@ -50,10 +50,14 @@ Blank out `LEVER_ON_IMAGE` to fall back to the drawn (native) lever.
 
 All spring/`Back`-eased for a clean, snappy feel:
 
-- **Panel** grows in on load.
+- **Panel** grows in and then does a smooth damped shake as it powers up.
+- **Border** is a thick `UIStroke` that overflows the panel edge. Off, it's a
+  still **reddish-black**. On, a `UIGradient` surge (reddish-black → crimson →
+  red → scarlet, endpoints matched) rotates so the colour **flows** around it,
+  and it breathes thicker with a switch-on power spike.
 - **Lever** does a squash-and-pop snap when it flips.
-- **Switch-on** flashes the whole redstone circuit (border, dust, separator)
-  bright for a moment, plus a tiny panel "thunk".
+- **Switch-on** also flashes the dust + separator bright for a moment, plus a
+  tiny panel "thunk".
 - **Speed slots** pop and warm up when focused; the live slot pops on every
   pick-up / drop.
 - **Rows** lighten on hover.
