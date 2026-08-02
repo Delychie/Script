@@ -12,13 +12,19 @@
 	    solves inside that plane, no force is ever applied on Y, so gravity,
 	    jumping and falling behave exactly as normal.
 	  * Every frame we read Humanoid.MoveDirection and push it into
-	    PlaneVelocity as Vector2.new(MoveDirection.X * speed, MoveDirection.Z * speed).
-	    Nothing ever writes to HumanoidRootPart.Velocity.
+	    PlaneVelocity as Vector2.new(MoveDirection.X * spd, MoveDirection.Z * spd),
+	    where `spd` is the Normal or Carry speed depending on whether a brainrot
+	    is being carried. Nothing ever writes to HumanoidRootPart.Velocity.
 	  * When there is no input the constraint is disabled so the character can
 	    slow down, get knocked around, and be moved by other physics normally.
 
-	Panel: draggable, has a speed box (+ a couple of quick presets) and an
-	ON/OFF button. RightShift toggles it as well.
+	Normal vs Carry: while you hold a brainrot the game slows your WalkSpeed and
+	sets a "Stealing" attribute. isCarryingBrainrot() reads that, and the mover
+	switches from Normal Speed to Carry Speed automatically (and back when you
+	drop it).
+
+	Panel: draggable, has Normal/Carry speed boxes (+ quick presets) and a pill
+	toggle. RightShift toggles it as well.
 ]]
 
 local Players = game:GetService("Players")
@@ -32,18 +38,25 @@ local playerGui = player:WaitForChild("PlayerGui")
 -- Config
 --==============================================================
 
-local DEFAULT_SPEED = 60
+local DEFAULT_NORMAL_SPEED = 60
+local DEFAULT_CARRY_SPEED = 27
 local MIN_SPEED = 0
 local MAX_SPEED = 1000
 local TOGGLE_KEY = Enum.KeyCode.RightShift
 local PRESETS = { 16, 32, 60, 100, 200 }
+
+-- The game drops your WalkSpeed below this while you carry a brainrot; that's
+-- how we detect the carry state (alongside the "Stealing" attribute).
+local CARRY_WALKSPEED_MAX = 25
 
 --==============================================================
 -- State
 --==============================================================
 
 local enabled = false
-local speed = DEFAULT_SPEED
+local normalSpeed = DEFAULT_NORMAL_SPEED
+local carrySpeed = DEFAULT_CARRY_SPEED
+local carrying = false -- true while a brainrot is being carried
 
 local character: Model? = nil
 local humanoid: Humanoid? = nil
@@ -158,6 +171,42 @@ local function onCharacterAdded(newCharacter: Model)
 end
 
 --==============================================================
+-- Carry / Normal speed
+--==============================================================
+
+-- True while a brainrot is being carried. The game slows the character's
+-- WalkSpeed below CARRY_WALKSPEED_MAX (but keeps it above 0) and/or sets a
+-- "Stealing" attribute on the player while carrying, so we read both.
+local function isCarryingBrainrot(): boolean
+	if player:GetAttribute("Stealing") == true then
+		return true
+	end
+	if humanoid and humanoid.WalkSpeed > 0 and humanoid.WalkSpeed < CARRY_WALKSPEED_MAX then
+		return true
+	end
+	return false
+end
+
+-- The two speeds, as their own functions.
+local function getNormalSpeed(): number
+	return normalSpeed
+end
+local function getCarrySpeed(): number
+	return carrySpeed
+end
+
+-- Speed to apply this frame: Carry while holding a brainrot, Normal otherwise.
+local function getActiveSpeed(): number
+	if carrying then
+		return getCarrySpeed()
+	end
+	return getNormalSpeed()
+end
+
+-- Assigned by the UI so a pick-up / drop updates the panel's mode readout.
+local onCarryChanged: (() -> ())? = nil
+
+--==============================================================
 -- Movement loop
 --==============================================================
 
@@ -195,6 +244,15 @@ local function updateCounter()
 end
 
 RunService.Heartbeat:Connect(function()
+	-- Detect pick-up / drop every frame and switch modes when it changes.
+	local nowCarrying = isCarryingBrainrot()
+	if nowCarrying ~= carrying then
+		carrying = nowCarrying
+		if onCarryChanged then
+			onCarryChanged()
+		end
+	end
+
 	updateCounter()
 
 	local velocity = linearVelocity
@@ -217,8 +275,10 @@ RunService.Heartbeat:Connect(function()
 		return
 	end
 
-	-- X and Z only. Y never gets a component, so gravity is untouched.
-	velocity.PlaneVelocity = Vector2.new(moveDirection.X * speed, moveDirection.Z * speed)
+	-- Carry Speed while holding a brainrot, Normal Speed otherwise. X and Z
+	-- only -- Y never gets a component, so gravity is untouched.
+	local spd = getActiveSpeed()
+	velocity.PlaneVelocity = Vector2.new(moveDirection.X * spd, moveDirection.Z * spd)
 	velocity.Enabled = true
 end)
 
@@ -301,8 +361,8 @@ gui.Parent = playerGui
 
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
-panel.Size = UDim2.fromOffset(250, 200)
-panel.Position = UDim2.new(0, 24, 0.5, -100)
+panel.Size = UDim2.fromOffset(250, 226)
+panel.Position = UDim2.new(0, 24, 0.5, -113)
 panel.BackgroundColor3 = BG
 panel.BackgroundTransparency = 0.06
 panel.BorderSizePixel = 0
@@ -365,55 +425,64 @@ task.spawn(function()
 	end
 end)
 
--- Speed row ---------------------------------------------------
-local speedRow = Instance.new("Frame")
-speedRow.Name = "SpeedRow"
-speedRow.Size = UDim2.new(1, -18, 0, 34)
-speedRow.Position = UDim2.fromOffset(9, 52)
-speedRow.BackgroundColor3 = CARD
-speedRow.BorderSizePixel = 0
-speedRow.Parent = panel
-Instance.new("UICorner", speedRow).CornerRadius = UDim.new(0, 6)
-addAnimatedStroke(speedRow, 1)
+-- Speed rows --------------------------------------------------
+-- Builds a "<label> ..... [ box ]" card and returns the box + label so the
+-- behaviour section can wire and highlight it.
+local function makeSpeedRow(name: string, labelText: string, defaultValue: number, y: number)
+	local row = Instance.new("Frame")
+	row.Name = name .. "Row"
+	row.Size = UDim2.new(1, -18, 0, 34)
+	row.Position = UDim2.fromOffset(9, y)
+	row.BackgroundColor3 = CARD
+	row.BorderSizePixel = 0
+	row.Parent = panel
+	Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+	addAnimatedStroke(row, 1)
 
-local speedLabel = Instance.new("TextLabel")
-speedLabel.Name = "SpeedLabel"
-speedLabel.Size = UDim2.new(0.5, 0, 1, 0)
-speedLabel.Position = UDim2.fromOffset(10, 0)
-speedLabel.BackgroundTransparency = 1
-speedLabel.Text = "Speed"
-speedLabel.Font = Enum.Font.GothamBold
-speedLabel.TextSize = 13
-speedLabel.TextXAlignment = Enum.TextXAlignment.Left
-speedLabel.TextColor3 = TEXT
-speedLabel.Parent = speedRow
+	local label = Instance.new("TextLabel")
+	label.Name = "Label"
+	label.Size = UDim2.new(0.55, 0, 1, 0)
+	label.Position = UDim2.fromOffset(10, 0)
+	label.BackgroundTransparency = 1
+	label.Text = labelText
+	label.Font = Enum.Font.GothamBold
+	label.TextSize = 13
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextColor3 = TEXT
+	label.Parent = row
 
-local speedBox = Instance.new("TextBox")
-speedBox.Name = "SpeedBox"
-speedBox.AnchorPoint = Vector2.new(1, 0.5)
-speedBox.Size = UDim2.fromOffset(74, 24)
-speedBox.Position = UDim2.new(1, -8, 0.5, 0)
-speedBox.BackgroundColor3 = FIELD
-speedBox.BorderSizePixel = 0
-speedBox.ClearTextOnFocus = false
-speedBox.Text = tostring(DEFAULT_SPEED)
-speedBox.PlaceholderText = "studs/s"
-speedBox.Font = Enum.Font.GothamBold
-speedBox.TextSize = 13
-speedBox.TextColor3 = PRIMARY_LIGHT
-speedBox.Parent = speedRow
-Instance.new("UICorner", speedBox).CornerRadius = UDim.new(0, 4)
+	local box = Instance.new("TextBox")
+	box.Name = "Box"
+	box.AnchorPoint = Vector2.new(1, 0.5)
+	box.Size = UDim2.fromOffset(74, 24)
+	box.Position = UDim2.new(1, -8, 0.5, 0)
+	box.BackgroundColor3 = FIELD
+	box.BorderSizePixel = 0
+	box.ClearTextOnFocus = false
+	box.Text = tostring(defaultValue)
+	box.PlaceholderText = "studs/s"
+	box.Font = Enum.Font.GothamBold
+	box.TextSize = 13
+	box.TextColor3 = PRIMARY_LIGHT
+	box.Parent = row
+	Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
 
-local speedBoxStroke = Instance.new("UIStroke")
-speedBoxStroke.Color = PRIMARY_DARK
-speedBoxStroke.Thickness = 1
-speedBoxStroke.Parent = speedBox
+	local boxStroke = Instance.new("UIStroke")
+	boxStroke.Color = PRIMARY_DARK
+	boxStroke.Thickness = 1
+	boxStroke.Parent = box
 
--- Presets -----------------------------------------------------
+	return box, boxStroke, label
+end
+
+local normalBox, normalBoxStroke, normalLabel = makeSpeedRow("Normal", "Normal Speed", DEFAULT_NORMAL_SPEED, 52)
+local carryBox, carryBoxStroke, carryLabel = makeSpeedRow("Carry", "Carry Speed", DEFAULT_CARRY_SPEED, 90)
+
+-- Presets (set the Normal speed) ------------------------------
 local presetRow = Instance.new("Frame")
 presetRow.Name = "Presets"
 presetRow.Size = UDim2.new(1, -18, 0, 26)
-presetRow.Position = UDim2.fromOffset(9, 92)
+presetRow.Position = UDim2.fromOffset(9, 130)
 presetRow.BackgroundTransparency = 1
 presetRow.Parent = panel
 
@@ -426,7 +495,7 @@ presetLayout.Parent = presetRow
 local toggleRow = Instance.new("Frame")
 toggleRow.Name = "ToggleRow"
 toggleRow.Size = UDim2.new(1, -18, 0, 36)
-toggleRow.Position = UDim2.fromOffset(9, 126)
+toggleRow.Position = UDim2.fromOffset(9, 162)
 toggleRow.BackgroundColor3 = CARD
 toggleRow.BorderSizePixel = 0
 toggleRow.Parent = panel
@@ -471,14 +540,14 @@ pillButton.Text = ""
 pillButton.AutoButtonColor = false
 pillButton.Parent = pill
 
--- Hint --------------------------------------------------------
+-- Mode readout / hint -----------------------------------------
 local hint = Instance.new("TextLabel")
 hint.Name = "Hint"
 hint.Size = UDim2.new(1, -18, 0, 16)
-hint.Position = UDim2.fromOffset(9, 172)
+hint.Position = UDim2.fromOffset(9, 200)
 hint.BackgroundTransparency = 1
 hint.Text = "RightShift to toggle"
-hint.Font = Enum.Font.Gotham
+hint.Font = Enum.Font.GothamBold
 hint.TextSize = 11
 hint.TextColor3 = SUBTEXT
 hint.TextXAlignment = Enum.TextXAlignment.Center
@@ -515,9 +584,14 @@ end
 -- UI behaviour
 --==============================================================
 
-local function setSpeed(value: number)
-	speed = math.clamp(value, MIN_SPEED, MAX_SPEED)
-	speedBox.Text = tostring(speed)
+local function setNormalSpeed(value: number)
+	normalSpeed = math.clamp(value, MIN_SPEED, MAX_SPEED)
+	normalBox.Text = tostring(normalSpeed)
+end
+
+local function setCarrySpeed(value: number)
+	carrySpeed = math.clamp(value, MIN_SPEED, MAX_SPEED)
+	carryBox.Text = tostring(carrySpeed)
 end
 
 local function animPill(on: boolean)
@@ -533,6 +607,26 @@ local function animPill(on: boolean)
 	}):Play()
 end
 
+-- Reflect the active mode: highlight whichever speed row is live and update the
+-- readout. Called on enable/disable, on a value edit, and on every carry/drop.
+local function updateMode()
+	local normalActive = enabled and not carrying
+	local carryActive = enabled and carrying
+	normalLabel.TextColor3 = normalActive and PRIMARY_LIGHT or TEXT
+	carryLabel.TextColor3 = carryActive and PRIMARY_LIGHT or TEXT
+
+	if not enabled then
+		hint.Text = "RightShift to toggle"
+		hint.TextColor3 = SUBTEXT
+	elseif carrying then
+		hint.Text = string.format("Carrying brainrot  •  %d", carrySpeed)
+		hint.TextColor3 = PRIMARY_LIGHT
+	else
+		hint.Text = string.format("Normal  •  %d", normalSpeed)
+		hint.TextColor3 = Color3.fromRGB(120, 255, 165)
+	end
+end
+
 local function setEnabled(value: boolean)
 	enabled = value
 	animPill(enabled)
@@ -546,20 +640,27 @@ local function setEnabled(value: boolean)
 			counterGui.Enabled = false
 		end
 	end
+	updateMode()
 end
 
-speedBox.Focused:Connect(function()
-	TweenService:Create(speedBoxStroke, TweenInfo.new(0.12), { Color = PRIMARY }):Play()
-end)
-speedBox.FocusLost:Connect(function()
-	TweenService:Create(speedBoxStroke, TweenInfo.new(0.12), { Color = PRIMARY_DARK }):Play()
-	local value = tonumber(speedBox.Text)
-	if value then
-		setSpeed(value)
-	else
-		speedBox.Text = tostring(speed) -- reject junk input
-	end
-end)
+-- Focus glow + validated commit, shared by both speed boxes.
+local function wireBox(box: TextBox, stroke: UIStroke, setter: (number) -> (), getter: () -> number)
+	box.Focused:Connect(function()
+		TweenService:Create(stroke, TweenInfo.new(0.12), { Color = PRIMARY }):Play()
+	end)
+	box.FocusLost:Connect(function()
+		TweenService:Create(stroke, TweenInfo.new(0.12), { Color = PRIMARY_DARK }):Play()
+		local value = tonumber(box.Text)
+		if value then
+			setter(value)
+		else
+			box.Text = tostring(getter()) -- reject junk input
+		end
+		updateMode()
+	end)
+end
+wireBox(normalBox, normalBoxStroke, setNormalSpeed, getNormalSpeed)
+wireBox(carryBox, carryBoxStroke, setCarrySpeed, getCarrySpeed)
 
 for _, preset in PRESETS do
 	local button = Instance.new("TextButton")
@@ -591,7 +692,8 @@ for _, preset in PRESETS do
 		TweenService:Create(button, TweenInfo.new(0.1), { BackgroundColor3 = FIELD }):Play()
 	end)
 	button.Activated:Connect(function()
-		setSpeed(preset)
+		setNormalSpeed(preset) -- presets set the Normal speed
+		updateMode()
 	end)
 end
 
@@ -612,8 +714,10 @@ end)
 -- Boot
 --==============================================================
 
+setNormalSpeed(DEFAULT_NORMAL_SPEED)
+setCarrySpeed(DEFAULT_CARRY_SPEED)
+onCarryChanged = updateMode -- the movement loop calls this on pick-up / drop
 setEnabled(false)
-setSpeed(DEFAULT_SPEED)
 
 if player.Character then
 	onCharacterAdded(player.Character)

@@ -9,10 +9,26 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
 
 ## Panel
 
-- **Speed box** — type a number, press Enter. Clamped to 0–1000.
-- **Presets** — 16 / 32 / 60 / 100 / 200.
-- **ON / OFF button** — toggles the boost. `RightShift` does the same.
+- **Normal Speed box** — speed used when you're not carrying anything.
+- **Carry Speed box** — speed used while carrying a brainrot.
+- Both clamped to 0–1000; type a number and press Enter.
+- **Presets** — 16 / 32 / 60 / 100 / 200 (set the Normal speed).
+- **Enable pill** — toggles the boost. `RightShift` does the same.
+- The readout at the bottom shows the live mode (`Normal` / `Carrying`).
 - The panel is draggable.
+
+## Normal vs Carry speed
+
+The mover picks a speed automatically based on whether you're holding a
+brainrot:
+
+- `isCarryingBrainrot()` returns `true` when the player's `Stealing` attribute
+  is set, or when `Humanoid.WalkSpeed` drops below `CARRY_WALKSPEED_MAX` (25)
+  while still above 0 — which is how the game marks the carry state.
+- Each frame the loop detects pick-up / drop transitions, flips between
+  `getNormalSpeed()` and `getCarrySpeed()`, and updates the panel's mode
+  readout. No input from you is needed — walk into a steal and it switches,
+  drop it and it switches back.
 
 ## Head counter
 
@@ -36,7 +52,8 @@ No `HumanoidRootPart.Velocity` writes anywhere.
    constraint as:
 
    ```lua
-   velocity.PlaneVelocity = Vector2.new(moveDirection.X * speed, moveDirection.Z * speed)
+   local spd = getActiveSpeed() -- Carry Speed while carrying, else Normal Speed
+   velocity.PlaneVelocity = Vector2.new(moveDirection.X * spd, moveDirection.Z * spd)
    ```
 
 4. When `MoveDirection` is zero (no input), the constraint is disabled so the
