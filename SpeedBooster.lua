@@ -512,6 +512,7 @@ local powerSurge = 0 -- brief flash to full brightness when the booster is switc
 local panelBorder: UIStroke? = nil
 local panelBorderGrad: UIGradient? = nil
 local PANEL_BORDER_BASE = 3 -- overflows the panel edge a little
+local borderSpin = 0 -- extra rotation velocity injected on activate; decays to the steady flow
 
 do
 	local t = 0
@@ -533,11 +534,14 @@ do
 
 		-- panel border: powered = flowing gradient surge; off = still reddish-black
 		if panelBorder and panelBorderGrad then
+			borderSpin = borderSpin - borderSpin * math.min(dt * 3.5, 1) -- decays to 0
 			if enabled then
 				panelBorderGrad.Enabled = true
 				panelBorder.Color = Color3.fromRGB(255, 255, 255) -- let the gradient show
-				panelBorderGrad.Rotation = (panelBorderGrad.Rotation + dt * 100) % 360 -- flow
-				panelBorder.Thickness = PANEL_BORDER_BASE + math.sin(t * 6) * 0.8 + powerSurge * 2
+				-- steady flow (~100/s) plus the decaying activate spin-up
+				panelBorderGrad.Rotation = (panelBorderGrad.Rotation + (100 + borderSpin) * dt) % 360
+				-- spin-up also spikes the thickness so it "charges up" as it appears
+				panelBorder.Thickness = PANEL_BORDER_BASE + math.sin(t * 6) * 0.8 + powerSurge * 2 + borderSpin * 0.004
 			else
 				panelBorderGrad.Enabled = false
 				panelBorder.Color = REDDISH_BLACK
@@ -559,8 +563,8 @@ gui.Parent = playerGui
 
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
-panel.Size = UDim2.fromOffset(250, 208)
-panel.Position = UDim2.new(0, 24, 0.5, -104)
+panel.Size = UDim2.fromOffset(250, 200)
+panel.Position = UDim2.new(0, 24, 0.5, -100)
 panel.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
 panel.BorderSizePixel = 0
 panel.Active = true
@@ -589,23 +593,12 @@ panelBorderGrad.Parent = panelBorder
 local panelScale = Instance.new("UIScale")
 panelScale.Parent = panel
 
--- redstone dust accent line near the top (powers on with the circuit)
-local sep = Instance.new("Frame")
-sep.Name = "Separator"
-sep.Size = UDim2.new(1, -20, 0, 3)
-sep.Position = UDim2.fromOffset(10, 12)
-sep.BackgroundColor3 = RED_DIM
-sep.BorderSizePixel = 0
-sep.ZIndex = 3
-sep.Parent = panel
-table.insert(redstoneLines, sep)
-
--- Title row (in the dark body, below the red line): dust indicator + title
+-- Title row (in the dark body): dust indicator + title
 local dust = Instance.new("ImageLabel")
 dust.Name = "RedstoneDust"
 dust.AnchorPoint = Vector2.new(0.5, 0.5) -- center pivot so the load shake looks right
 dust.Size = UDim2.fromOffset(20, 20)
-dust.Position = UDim2.new(0, 20, 0, 34)
+dust.Position = UDim2.new(0, 20, 0, 26)
 dust.BackgroundTransparency = 1
 dust.Image = DUST_IMAGE
 dust.ScaleType = Enum.ScaleType.Fit
@@ -617,7 +610,7 @@ table.insert(redstoneImages, dust)
 local title = Instance.new("TextLabel")
 title.Name = "Title"
 title.Size = UDim2.new(1, -46, 0, 24)
-title.Position = UDim2.fromOffset(36, 22)
+title.Position = UDim2.fromOffset(36, 14)
 title.BackgroundTransparency = 1
 title.Text = "DELY BOOSTER TEST 67"
 title.Font = FONT
@@ -695,14 +688,14 @@ local function makeSpeedRow(name: string, labelText: string, defaultValue: numbe
 	return box, label, boxScale
 end
 
-local normalBox, normalLabel, normalBoxScale = makeSpeedRow("Normal", "NORMAL SPEED", DEFAULT_NORMAL_SPEED, 54)
-local carryBox, carryLabel, carryBoxScale = makeSpeedRow("Carry", "CARRY SPEED", DEFAULT_CARRY_SPEED, 92)
+local normalBox, normalLabel, normalBoxScale = makeSpeedRow("Normal", "NORMAL SPEED", DEFAULT_NORMAL_SPEED, 46)
+local carryBox, carryLabel, carryBoxScale = makeSpeedRow("Carry", "CARRY SPEED", DEFAULT_CARRY_SPEED, 84)
 
 -- Toggle row with a redstone lever -----------------------------
 local toggleRow = Instance.new("Frame")
 toggleRow.Name = "ToggleRow"
 toggleRow.Size = UDim2.new(1, -20, 0, 32)
-toggleRow.Position = UDim2.fromOffset(10, 130)
+toggleRow.Position = UDim2.fromOffset(10, 122)
 toggleRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 toggleRow.BorderSizePixel = 0
 toggleRow.ZIndex = 2
@@ -802,7 +795,7 @@ leverButton.Parent = toggleRow
 local counterRow = Instance.new("Frame")
 counterRow.Name = "CounterRow"
 counterRow.Size = UDim2.new(1, -20, 0, 32)
-counterRow.Position = UDim2.fromOffset(10, 168)
+counterRow.Position = UDim2.fromOffset(10, 160)
 counterRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 counterRow.BorderSizePixel = 0
 counterRow.ZIndex = 2
@@ -947,12 +940,22 @@ local function setEnabled(value: boolean)
 	animLever(enabled)
 
 	if enabled then
-		powerSurge = 1        -- flash the whole circuit bright
+		powerSurge = 1          -- flash the whole circuit bright
 		punch(panelScale, 1.03) -- little power "thunk"
+		borderSpin = 1000       -- gradient whirls in fast, then eases to the steady flow
+		if panelBorder then     -- and fades in as it charges up
+			panelBorder.Transparency = 1
+			TweenService:Create(panelBorder, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Transparency = 0,
+			}):Play()
+		end
 	else
 		if linearVelocity then
 			linearVelocity.Enabled = false
 			linearVelocity.PlaneVelocity = Vector2.zero
+		end
+		if panelBorder then
+			panelBorder.Transparency = 0 -- reddish-black border stays visible when off
 		end
 	end
 	updateMode()

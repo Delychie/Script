@@ -53,13 +53,13 @@ All spring/`Back`-eased for a clean, snappy feel:
 
 - **Panel** grows in on load; the **redstone dust** and the **lever** then do a
   smooth damped shake as it powers up (the panel itself no longer rotates).
-- **Border** is a thick `UIStroke` that overflows the panel edge. Off, it's a
-  still **reddish-black**. On, a `UIGradient` surge (reddish-black → crimson →
-  red → scarlet, endpoints matched) rotates so the colour **flows** around it,
-  and it breathes thicker with a switch-on power spike.
+- **Border** is a `UIStroke` that overflows the panel edge. Off, it's a still
+  **reddish-black**. When you power on, the gradient (reddish-black → crimson →
+  red → scarlet, endpoints matched) **whirls in fast and fades up**, then eases
+  into a steady flow around the border, breathing slightly.
 - **Lever** does a squash-and-pop snap when it flips.
-- **Switch-on** also flashes the dust + separator bright for a moment, plus a
-  tiny panel "thunk".
+- **Switch-on** also flashes the dust bright for a moment, plus a tiny panel
+  "thunk".
 - **Speed slots** pop and warm up when focused; the live slot pops on every
   pick-up / drop.
 - **Rows** lighten on hover.
