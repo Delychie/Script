@@ -226,6 +226,9 @@ local function buildCounter()
 	plate.BorderSizePixel = 0
 	plate.ZIndex = 1
 	plate.Parent = billboard
+	local plateCorner = Instance.new("UICorner")
+	plateCorner.CornerRadius = UDim.new(0, 6)
+	plateCorner.Parent = plate
 	local plateStroke = Instance.new("UIStroke")
 	plateStroke.Color = RED_MID
 	plateStroke.Thickness = 1.5
@@ -439,22 +442,22 @@ end)
 -- UI helpers (Minecraft pixel bevels + powered redstone border)
 --==============================================================
 
--- Draws a 2px pixel bevel: light top/left, dark bottom/right. Pass the colours
--- swapped to get an inset (pressed-in) look for slots.
-local function addBevel(frame: GuiObject, hi: Color3, lo: Color3)
-	local function edge(size: UDim2, pos: UDim2, color: Color3)
-		local f = Instance.new("Frame")
-		f.Size = size
-		f.Position = pos
-		f.BackgroundColor3 = color
-		f.BorderSizePixel = 0
-		f.ZIndex = frame.ZIndex + 1
-		f.Parent = frame
-	end
-	edge(UDim2.new(1, 0, 0, 2), UDim2.new(0, 0, 0, 0), hi) -- top
-	edge(UDim2.new(0, 2, 1, 0), UDim2.new(0, 0, 0, 0), hi) -- left
-	edge(UDim2.new(1, 0, 0, 2), UDim2.new(0, 0, 1, -2), lo) -- bottom
-	edge(UDim2.new(0, 2, 1, 0), UDim2.new(1, -2, 0, 0), lo) -- right
+-- Rounds a corner and (optionally) gives it a soft edge stroke. Replaces the old
+-- square pixel bevels so everything reads smooth.
+local function round(inst: GuiObject, radius: number)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, radius)
+	c.Parent = inst
+	return c
+end
+
+local function edgeStroke(inst: GuiObject, color: Color3, thickness: number?, transparency: number?)
+	local s = Instance.new("UIStroke")
+	s.Color = color
+	s.Thickness = thickness or 1
+	s.Transparency = transparency or 0
+	s.Parent = inst
+	return s
 end
 
 -- Snappy scale pop: set to `from`, spring back to 1. Used all over for feedback.
@@ -532,8 +535,8 @@ panelGradient.Rotation = 90
 panelGradient.Color = ColorSequence.new(STONE_TOP, STONE_BOT)
 panelGradient.Parent = panel
 
-addBevel(panel, BEVEL_HI, BEVEL_LO)  -- raised stone slab
-addRedstoneStroke(panel, 2.5)        -- powered redstone dust outline
+round(panel, 12)                     -- smooth slab corners
+addRedstoneStroke(panel, 2.5)        -- powered redstone dust outline (follows the corner)
 
 local panelScale = Instance.new("UIScale")
 panelScale.Parent = panel
@@ -595,7 +598,8 @@ body.BackgroundColor3 = Color3.fromRGB(20, 20, 22)
 body.BorderSizePixel = 0
 body.ZIndex = 1
 body.Parent = panel
-addBevel(body, BEVEL_LO, BEVEL_HI) -- inset (sunken) bevel
+round(body, 9)
+edgeStroke(body, Color3.fromRGB(8, 8, 10), 1, 0.15) -- dark rim = recessed look
 
 -- Speed rows --------------------------------------------------
 -- Builds a "<label> ..... [ slot ]" stone row and returns the box + label.
@@ -608,7 +612,8 @@ local function makeSpeedRow(name: string, labelText: string, defaultValue: numbe
 	row.BorderSizePixel = 0
 	row.ZIndex = 2
 	row.Parent = panel
-	addBevel(row, BEVEL_HI, BEVEL_LO)
+	round(row, 6)
+	edgeStroke(row, Color3.fromRGB(62, 62, 70), 1, 0.25) -- soft raised rim
 
 	local label = Instance.new("TextLabel")
 	label.Name = "Label"
@@ -639,7 +644,8 @@ local function makeSpeedRow(name: string, labelText: string, defaultValue: numbe
 	box.TextColor3 = Color3.fromRGB(255, 90, 90)
 	box.ZIndex = 3
 	box.Parent = row
-	addBevel(box, BEVEL_LO, BEVEL_HI) -- swapped = pressed-in slot
+	round(box, 5)
+	edgeStroke(box, Color3.fromRGB(8, 8, 10), 1, 0) -- dark rim = pressed-in slot
 	local boxScale = Instance.new("UIScale")
 	boxScale.Parent = box
 
@@ -673,7 +679,8 @@ toggleRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 toggleRow.BorderSizePixel = 0
 toggleRow.ZIndex = 2
 toggleRow.Parent = panel
-addBevel(toggleRow, BEVEL_HI, BEVEL_LO)
+round(toggleRow, 6)
+edgeStroke(toggleRow, Color3.fromRGB(62, 62, 70), 1, 0.25)
 toggleRow.MouseEnter:Connect(function()
 	TweenService:Create(toggleRow, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(46, 46, 52) }):Play()
 end)
@@ -704,7 +711,8 @@ leverBase.BackgroundColor3 = Color3.fromRGB(64, 64, 70)
 leverBase.BorderSizePixel = 0
 leverBase.ZIndex = 3
 leverBase.Parent = toggleRow
-addBevel(leverBase, Color3.fromRGB(96, 96, 104), Color3.fromRGB(28, 28, 32))
+round(leverBase, 4)
+edgeStroke(leverBase, Color3.fromRGB(24, 24, 28), 1, 0.2)
 
 -- lever handle (pivots at the base) — starts in the OFF position
 local handle = Instance.new("Frame")
@@ -717,7 +725,7 @@ handle.BackgroundColor3 = Color3.fromRGB(120, 120, 128)
 handle.BorderSizePixel = 0
 handle.ZIndex = 4
 handle.Parent = leverBase
-addBevel(handle, Color3.fromRGB(150, 150, 158), Color3.fromRGB(60, 60, 66))
+round(handle, 3)
 
 -- knob at the top of the handle — the redstone tip that lights up when ON
 local knob = Instance.new("Frame")
@@ -729,7 +737,7 @@ knob.BackgroundColor3 = Color3.fromRGB(70, 22, 22)
 knob.BorderSizePixel = 0
 knob.ZIndex = 5
 knob.Parent = handle
-addBevel(knob, Color3.fromRGB(150, 60, 60), Color3.fromRGB(40, 12, 12))
+round(knob, 6) -- round redstone tip
 
 -- If you uploaded a lever image, use it instead of the drawn one.
 local useLeverImage = LEVER_ON_IMAGE ~= ""
@@ -771,7 +779,8 @@ counterRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 counterRow.BorderSizePixel = 0
 counterRow.ZIndex = 2
 counterRow.Parent = panel
-addBevel(counterRow, BEVEL_HI, BEVEL_LO)
+round(counterRow, 6)
+edgeStroke(counterRow, Color3.fromRGB(62, 62, 70), 1, 0.25)
 counterRow.MouseEnter:Connect(function()
 	TweenService:Create(counterRow, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(46, 46, 52) }):Play()
 end)
@@ -803,7 +812,8 @@ swTrack.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
 swTrack.BorderSizePixel = 0
 swTrack.ZIndex = 3
 swTrack.Parent = counterRow
-addBevel(swTrack, BEVEL_LO, BEVEL_HI) -- inset track
+round(swTrack, 9) -- pill track
+edgeStroke(swTrack, Color3.fromRGB(8, 8, 10), 1, 0.1)
 
 local swKnob = Instance.new("Frame")
 swKnob.Name = "SwitchKnob"
@@ -813,7 +823,7 @@ swKnob.BackgroundColor3 = Color3.fromRGB(70, 70, 76) -- stone (off)
 swKnob.BorderSizePixel = 0
 swKnob.ZIndex = 4
 swKnob.Parent = swTrack
-addBevel(swKnob, Color3.fromRGB(104, 104, 112), Color3.fromRGB(34, 34, 38)) -- raised block
+round(swKnob, 8) -- round knob
 
 local counterButton = Instance.new("TextButton")
 counterButton.Size = UDim2.fromScale(1, 1)

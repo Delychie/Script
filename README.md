@@ -30,10 +30,10 @@ change a value it writes `dely_booster_test67.json`, and on load it applies the
 saved **normal speed, carry speed, boost on/off, speed-counter on/off, and panel
 position**. No save button — it just remembers.
 
-The blocky look uses `Enum.Font.Arcade` (the closest built-in to Minecraftia)
-and 2px pixel bevels — light top/left, dark bottom/right — on the slab and
-buttons, inset (pressed-in) on the speed slots and the sunken inner body. Swap
-in a real Minecraftia font asset later if you want it pixel-perfect.
+The look uses `Enum.Font.Arcade` (the closest built-in to Minecraftia) with
+rounded corners (`UICorner`) throughout and soft edge strokes — light rims on
+raised pieces, dark rims on the recessed body and slots for depth. Swap in a
+real Minecraftia font asset later if you want it pixel-perfect.
 
 ### Custom images
 
