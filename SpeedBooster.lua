@@ -559,17 +559,16 @@ gui.Parent = playerGui
 
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
-panel.Size = UDim2.fromOffset(250, 210)
-panel.Position = UDim2.new(0, 24, 0.5, -105)
-panel.BackgroundColor3 = STONE_TOP
+panel.Size = UDim2.fromOffset(250, 208)
+panel.Position = UDim2.new(0, 24, 0.5, -104)
+panel.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
 panel.BorderSizePixel = 0
 panel.Active = true
-panel.ClipsDescendants = true -- so the black title bar keeps the panel's rounded top corners
 panel.Parent = gui
 
 local panelGradient = Instance.new("UIGradient")
 panelGradient.Rotation = 90
-panelGradient.Color = ColorSequence.new(STONE_TOP, STONE_BOT)
+panelGradient.Color = ColorSequence.new(Color3.fromRGB(30, 30, 34), Color3.fromRGB(14, 14, 16)) -- dark body
 panelGradient.Parent = panel
 
 round(panel, 12)                     -- smooth slab corners
@@ -590,34 +589,35 @@ panelBorderGrad.Parent = panelBorder
 local panelScale = Instance.new("UIScale")
 panelScale.Parent = panel
 
--- Header ------------------------------------------------------
-local header = Instance.new("Frame")
-header.Name = "Header"
-header.Size = UDim2.new(1, 0, 0, 42)
-header.BackgroundColor3 = Color3.fromRGB(10, 10, 12) -- black title bar
-header.BackgroundTransparency = 0
-header.BorderSizePixel = 0
-header.ZIndex = 3
-header.Parent = panel
+-- redstone dust accent line near the top (powers on with the circuit)
+local sep = Instance.new("Frame")
+sep.Name = "Separator"
+sep.Size = UDim2.new(1, -20, 0, 3)
+sep.Position = UDim2.fromOffset(10, 12)
+sep.BackgroundColor3 = RED_DIM
+sep.BorderSizePixel = 0
+sep.ZIndex = 3
+sep.Parent = panel
+table.insert(redstoneLines, sep)
 
--- redstone-dust indicator: dim when unpowered, glows/pulses red with the circuit
+-- Title row (in the dark body, below the red line): dust indicator + title
 local dust = Instance.new("ImageLabel")
 dust.Name = "RedstoneDust"
 dust.AnchorPoint = Vector2.new(0.5, 0.5) -- center pivot so the load shake looks right
 dust.Size = UDim2.fromOffset(20, 20)
-dust.Position = UDim2.new(0, 19, 0.5, 0)
+dust.Position = UDim2.new(0, 20, 0, 34)
 dust.BackgroundTransparency = 1
 dust.Image = DUST_IMAGE
 dust.ScaleType = Enum.ScaleType.Fit
 dust.ImageColor3 = RED_DIM
-dust.ZIndex = 4
-dust.Parent = header
+dust.ZIndex = 3
+dust.Parent = panel
 table.insert(redstoneImages, dust)
 
 local title = Instance.new("TextLabel")
 title.Name = "Title"
-title.Size = UDim2.new(1, -40, 1, 0)
-title.Position = UDim2.fromOffset(34, 0)
+title.Size = UDim2.new(1, -46, 0, 24)
+title.Position = UDim2.fromOffset(36, 22)
 title.BackgroundTransparency = 1
 title.Text = "DELY BOOSTER TEST 67"
 title.Font = FONT
@@ -626,32 +626,8 @@ title.TextColor3 = Color3.fromRGB(245, 245, 248)
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.TextStrokeTransparency = 0.5
 title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-title.ZIndex = 4
-title.Parent = header
-
--- redstone dust separator (powers on with the circuit)
-local sep = Instance.new("Frame")
-sep.Name = "Separator"
-sep.Size = UDim2.new(1, -20, 0, 3)
-sep.Position = UDim2.fromOffset(10, 42)
-sep.BackgroundColor3 = RED_DIM
-sep.BorderSizePixel = 0
-sep.ZIndex = 3
-sep.Parent = panel
-table.insert(redstoneLines, sep)
-
--- Recessed inner body: a darker well the rows/buttons sit inside, so the panel
--- reads like a real Minecraft window (outer slab + sunken content area).
-local body = Instance.new("Frame")
-body.Name = "Body"
-body.Size = UDim2.new(1, -20, 0, 154)
-body.Position = UDim2.fromOffset(10, 48)
-body.BackgroundColor3 = Color3.fromRGB(20, 20, 22)
-body.BorderSizePixel = 0
-body.ZIndex = 1
-body.Parent = panel
-round(body, 9)
-edgeStroke(body, Color3.fromRGB(8, 8, 10), 1, 0.15) -- dark rim = recessed look
+title.ZIndex = 3
+title.Parent = panel
 
 -- Speed rows --------------------------------------------------
 -- Builds a "<label> ..... [ slot ]" stone row and returns the box + label.
@@ -719,14 +695,14 @@ local function makeSpeedRow(name: string, labelText: string, defaultValue: numbe
 	return box, label, boxScale
 end
 
-local normalBox, normalLabel, normalBoxScale = makeSpeedRow("Normal", "NORMAL SPEED", DEFAULT_NORMAL_SPEED, 52)
-local carryBox, carryLabel, carryBoxScale = makeSpeedRow("Carry", "CARRY SPEED", DEFAULT_CARRY_SPEED, 90)
+local normalBox, normalLabel, normalBoxScale = makeSpeedRow("Normal", "NORMAL SPEED", DEFAULT_NORMAL_SPEED, 54)
+local carryBox, carryLabel, carryBoxScale = makeSpeedRow("Carry", "CARRY SPEED", DEFAULT_CARRY_SPEED, 92)
 
 -- Toggle row with a redstone lever -----------------------------
 local toggleRow = Instance.new("Frame")
 toggleRow.Name = "ToggleRow"
 toggleRow.Size = UDim2.new(1, -20, 0, 32)
-toggleRow.Position = UDim2.fromOffset(10, 128)
+toggleRow.Position = UDim2.fromOffset(10, 130)
 toggleRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 toggleRow.BorderSizePixel = 0
 toggleRow.ZIndex = 2
@@ -826,7 +802,7 @@ leverButton.Parent = toggleRow
 local counterRow = Instance.new("Frame")
 counterRow.Name = "CounterRow"
 counterRow.Size = UDim2.new(1, -20, 0, 32)
-counterRow.Position = UDim2.fromOffset(10, 166)
+counterRow.Position = UDim2.fromOffset(10, 168)
 counterRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 counterRow.BorderSizePixel = 0
 counterRow.ZIndex = 2

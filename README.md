@@ -32,7 +32,8 @@ position**. No save button — it just remembers.
 
 The look uses `Enum.Font.Arcade` (the closest built-in to Minecraftia) with
 rounded corners (`UICorner`) throughout and soft edge strokes — light rims on
-raised pieces, dark rims on the recessed body and slots for depth. Swap in a
+raised pieces, dark rims on the slots for depth. The title sits inside the dark
+panel body just below the red accent line. Swap in a
 real Minecraftia font asset later if you want it pixel-perfect.
 
 ### Custom images
