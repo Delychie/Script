@@ -46,6 +46,12 @@ local MAX_SPEED = 1000
 local TOGGLE_KEY = Enum.KeyCode.RightShift
 local PRESETS = { 16, 32, 60, 100, 200 }
 
+-- Optional: paste your uploaded redstone-lever image ids here. When LEVER_ON_IMAGE
+-- is filled in, the panel uses your images instead of the drawn lever (OFF falls
+-- back to the ON image if you only upload one). Leave blank to keep the native lever.
+local LEVER_ON_IMAGE = ""
+local LEVER_OFF_IMAGE = ""
+
 -- The game drops your WalkSpeed below this while you carry a brainrot; that's
 -- how we detect the carry state (alongside the "Stealing" attribute).
 local CARRY_WALKSPEED_MAX = 25
@@ -155,12 +161,29 @@ local function buildCounter()
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "SpeedBoosterCounter"
 	billboard.Adornee = head
-	billboard.Size = UDim2.fromOffset(150, 44)
-	billboard.StudsOffsetWorldSpace = Vector3.new(0, 2.4, 0)
+	billboard.Size = UDim2.fromOffset(150, 40)
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, 2.6, 0)
 	billboard.AlwaysOnTop = true
 	billboard.MaxDistance = 200
 	billboard.Enabled = false
 	billboard.Parent = head
+
+	-- Minecraft nametag-style plate: dark translucent slab with a redstone edge.
+	local plate = Instance.new("Frame")
+	plate.Name = "Plate"
+	plate.AnchorPoint = Vector2.new(0.5, 0.5)
+	plate.Size = UDim2.fromScale(0.86, 0.78)
+	plate.Position = UDim2.fromScale(0.5, 0.5)
+	plate.BackgroundColor3 = Color3.fromRGB(12, 12, 14)
+	plate.BackgroundTransparency = 0.35
+	plate.BorderSizePixel = 0
+	plate.ZIndex = 1
+	plate.Parent = billboard
+	local plateStroke = Instance.new("UIStroke")
+	plateStroke.Color = RED_MID
+	plateStroke.Thickness = 1.5
+	plateStroke.Transparency = 0.15
+	plateStroke.Parent = plate
 
 	local label = Instance.new("TextLabel")
 	label.Name = "Readout"
@@ -172,6 +195,7 @@ local function buildCounter()
 	label.TextColor3 = Color3.fromRGB(255, 255, 255)
 	label.TextStrokeTransparency = 0.3
 	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	label.ZIndex = 2
 	label.Parent = billboard
 
 	counterGui = billboard
@@ -439,6 +463,18 @@ sep.ZIndex = 3
 sep.Parent = panel
 table.insert(redstoneLines, sep)
 
+-- Recessed inner body: a darker well the rows/buttons sit inside, so the panel
+-- reads like a real Minecraft window (outer slab + sunken content area).
+local body = Instance.new("Frame")
+body.Name = "Body"
+body.Size = UDim2.new(1, -20, 0, 150)
+body.Position = UDim2.fromOffset(10, 48)
+body.BackgroundColor3 = Color3.fromRGB(20, 20, 22)
+body.BorderSizePixel = 0
+body.ZIndex = 1
+body.Parent = panel
+addBevel(body, BEVEL_LO, BEVEL_HI) -- inset (sunken) bevel
+
 -- Speed rows --------------------------------------------------
 -- Builds a "<label> ..... [ slot ]" stone row and returns the box + label.
 local function makeSpeedRow(name: string, labelText: string, defaultValue: number, y: number)
@@ -564,6 +600,24 @@ knob.ZIndex = 5
 knob.Parent = handle
 addBevel(knob, Color3.fromRGB(150, 60, 60), Color3.fromRGB(40, 12, 12))
 
+-- If you uploaded a lever image, use it instead of the drawn one.
+local useLeverImage = LEVER_ON_IMAGE ~= ""
+local leverImage: ImageLabel? = nil
+if useLeverImage then
+	leverBase.Visible = false -- hide the drawn base/handle/knob
+	local img = Instance.new("ImageLabel")
+	img.Name = "LeverImage"
+	img.AnchorPoint = Vector2.new(1, 0.5)
+	img.Size = UDim2.fromOffset(42, 42)
+	img.Position = UDim2.new(1, -8, 0.5, 0)
+	img.BackgroundTransparency = 1
+	img.ScaleType = Enum.ScaleType.Fit
+	img.Image = (LEVER_OFF_IMAGE ~= "" and LEVER_OFF_IMAGE) or LEVER_ON_IMAGE
+	img.ZIndex = 4
+	img.Parent = toggleRow
+	leverImage = img
+end
+
 -- whole row is clickable
 local leverButton = Instance.new("TextButton")
 leverButton.Size = UDim2.fromScale(1, 1)
@@ -628,19 +682,28 @@ local function setCarrySpeed(value: number)
 	carryBox.Text = tostring(carrySpeed)
 end
 
--- Flip the lever + light the lamp/knob when powered.
+-- Flip the lever + light the lamp/knob/title when powered.
 local function animLever(on: boolean)
-	TweenService:Create(handle, TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-		Rotation = on and -38 or 38,
-	}):Play()
-	TweenService:Create(knob, TweenInfo.new(0.16), {
-		BackgroundColor3 = on and RED_BRIGHT or Color3.fromRGB(70, 22, 22),
-	}):Play()
+	if useLeverImage and leverImage then
+		leverImage.Image = on and LEVER_ON_IMAGE
+			or ((LEVER_OFF_IMAGE ~= "" and LEVER_OFF_IMAGE) or LEVER_ON_IMAGE)
+	else
+		TweenService:Create(handle, TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+			Rotation = on and -38 or 38,
+		}):Play()
+		TweenService:Create(knob, TweenInfo.new(0.16), {
+			BackgroundColor3 = on and RED_BRIGHT or Color3.fromRGB(70, 22, 22),
+		}):Play()
+	end
 	TweenService:Create(lamp, TweenInfo.new(0.18), {
 		BackgroundColor3 = on and RED_BRIGHT or Color3.fromRGB(70, 25, 25),
 	}):Play()
 	TweenService:Create(lampGlow, TweenInfo.new(0.18), {
 		BackgroundTransparency = on and 0.55 or 1,
+	}):Play()
+	-- title warms up slightly when the circuit is powered
+	TweenService:Create(title, TweenInfo.new(0.18), {
+		TextColor3 = on and Color3.fromRGB(255, 232, 232) or Color3.fromRGB(245, 245, 248),
 	}):Play()
 end
 
@@ -651,6 +714,9 @@ local function updateMode()
 	local carryActive = enabled and carrying
 	normalLabel.TextColor3 = normalActive and RED_BRIGHT or TEXT
 	carryLabel.TextColor3 = carryActive and RED_BRIGHT or TEXT
+	-- energise the live slot with a faint warm-red fill
+	normalBox.BackgroundColor3 = normalActive and Color3.fromRGB(34, 16, 16) or SLOT
+	carryBox.BackgroundColor3 = carryActive and Color3.fromRGB(34, 16, 16) or SLOT
 
 	if not enabled then
 		hint.Text = "RIGHTSHIFT TO TOGGLE"
@@ -715,6 +781,20 @@ for _, preset in PRESETS do
 	end)
 	button.MouseLeave:Connect(function()
 		TweenService:Create(button, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(70, 70, 76) }):Play()
+	end)
+	-- pressed-block feel: sink on press, pop back on release
+	local restSize = button.Size
+	button.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			TweenService:Create(button, TweenInfo.new(0.06), { Size = UDim2.new(0, 34, 1, -4) }):Play()
+		end
+	end)
+	button.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			TweenService:Create(button, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = restSize }):Play()
+		end
 	end)
 	button.Activated:Connect(function()
 		setNormalSpeed(preset) -- presets set the Normal speed

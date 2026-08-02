@@ -22,8 +22,15 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
 
 The blocky look uses `Enum.Font.Arcade` (the closest built-in to Minecraftia)
 and 2px pixel bevels — light top/left, dark bottom/right — on the slab and
-buttons, inset (pressed-in) on the speed slots. Swap in a real Minecraftia
-font asset later if you want it pixel-perfect.
+buttons, inset (pressed-in) on the speed slots and the sunken inner body. Swap
+in a real Minecraftia font asset later if you want it pixel-perfect.
+
+### Custom lever image
+
+Uploaded your own redstone switch? Paste the asset id into `LEVER_ON_IMAGE` (and
+optionally `LEVER_OFF_IMAGE`) at the top of the script. When `LEVER_ON_IMAGE` is
+set, the panel hides the drawn lever and shows your image instead, swapping it on
+toggle. Leave both blank to keep the native drawn lever.
 
 ## Normal vs Carry speed
 
