@@ -46,11 +46,11 @@ local MAX_SPEED = 1000
 local TOGGLE_KEY = Enum.KeyCode.RightShift
 local PRESETS = { 16, 32, 60, 100, 200 }
 
--- Optional: paste your uploaded redstone-lever image ids here. When LEVER_ON_IMAGE
--- is filled in, the panel uses your images instead of the drawn lever (OFF falls
--- back to the ON image if you only upload one). Leave blank to keep the native lever.
-local LEVER_ON_IMAGE = ""
-local LEVER_OFF_IMAGE = ""
+-- Uploaded redstone-lever images: ON = lever up, OFF = lever down.
+local LEVER_ON_IMAGE = "rbxassetid://130564537890360"
+local LEVER_OFF_IMAGE = "rbxassetid://102532019315855"
+-- Redstone-dust image in the header (replaces the drawn indicator).
+local DUST_IMAGE = "rbxassetid://83833754384535"
 
 -- The game drops your WalkSpeed below this while you carry a brainrot; that's
 -- how we detect the carry state (alongside the "Stealing" attribute).
@@ -350,6 +350,7 @@ end
 -- redstoneLines get tinted the same way (used by the separator).
 local redstoneStrokes: { UIStroke } = {}
 local redstoneLines: { Frame } = {}
+local redstoneImages: { ImageLabel } = {} -- tinted via ImageColor3
 
 local function addRedstoneStroke(frame: GuiObject, thickness: number?)
 	local stroke = Instance.new("UIStroke")
@@ -375,6 +376,10 @@ do
 		for i = #redstoneLines, 1, -1 do
 			local l = redstoneLines[i]
 			if l.Parent then l.BackgroundColor3 = col else table.remove(redstoneLines, i) end
+		end
+		for i = #redstoneImages, 1, -1 do
+			local img = redstoneImages[i]
+			if img.Parent then img.ImageColor3 = col else table.remove(redstoneImages, i) end
 		end
 	end)
 end
@@ -415,27 +420,18 @@ header.BackgroundTransparency = 1
 header.ZIndex = 3
 header.Parent = panel
 
--- redstone lamp (dark when unpowered, glows when the booster is on)
-local lampGlow = Instance.new("Frame")
-lampGlow.Name = "LampGlow"
-lampGlow.Size = UDim2.fromOffset(18, 18)
-lampGlow.Position = UDim2.new(0, 10, 0.5, -9)
-lampGlow.BackgroundColor3 = RED_BRIGHT
-lampGlow.BackgroundTransparency = 1
-lampGlow.BorderSizePixel = 0
-lampGlow.ZIndex = 3
-lampGlow.Parent = header
-Instance.new("UICorner", lampGlow).CornerRadius = UDim.new(1, 0)
-
-local lamp = Instance.new("Frame")
-lamp.Name = "Lamp"
-lamp.Size = UDim2.fromOffset(12, 12)
-lamp.Position = UDim2.new(0, 13, 0.5, -6)
-lamp.BackgroundColor3 = Color3.fromRGB(70, 25, 25)
-lamp.BorderSizePixel = 0
-lamp.ZIndex = 4
-lamp.Parent = header
-addBevel(lamp, Color3.fromRGB(120, 60, 60), Color3.fromRGB(30, 10, 10))
+-- redstone-dust indicator: dim when unpowered, glows/pulses red with the circuit
+local dust = Instance.new("ImageLabel")
+dust.Name = "RedstoneDust"
+dust.Size = UDim2.fromOffset(20, 20)
+dust.Position = UDim2.new(0, 9, 0.5, -10)
+dust.BackgroundTransparency = 1
+dust.Image = DUST_IMAGE
+dust.ScaleType = Enum.ScaleType.Fit
+dust.ImageColor3 = RED_DIM
+dust.ZIndex = 4
+dust.Parent = header
+table.insert(redstoneImages, dust)
 
 local title = Instance.new("TextLabel")
 title.Name = "Title"
@@ -682,7 +678,7 @@ local function setCarrySpeed(value: number)
 	carryBox.Text = tostring(carrySpeed)
 end
 
--- Flip the lever + light the lamp/knob/title when powered.
+-- Flip the lever + warm the title when powered (dust pulses via the loop).
 local function animLever(on: boolean)
 	if useLeverImage and leverImage then
 		leverImage.Image = on and LEVER_ON_IMAGE
@@ -695,13 +691,7 @@ local function animLever(on: boolean)
 			BackgroundColor3 = on and RED_BRIGHT or Color3.fromRGB(70, 22, 22),
 		}):Play()
 	end
-	TweenService:Create(lamp, TweenInfo.new(0.18), {
-		BackgroundColor3 = on and RED_BRIGHT or Color3.fromRGB(70, 25, 25),
-	}):Play()
-	TweenService:Create(lampGlow, TweenInfo.new(0.18), {
-		BackgroundTransparency = on and 0.55 or 1,
-	}):Play()
-	-- title warms up slightly when the circuit is powered
+	-- (the header dust pulses via the redstone loop) title warms when powered
 	TweenService:Create(title, TweenInfo.new(0.18), {
 		TextColor3 = on and Color3.fromRGB(255, 232, 232) or Color3.fromRGB(245, 245, 248),
 	}):Play()

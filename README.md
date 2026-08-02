@@ -25,12 +25,16 @@ and 2px pixel bevels — light top/left, dark bottom/right — on the slab and
 buttons, inset (pressed-in) on the speed slots and the sunken inner body. Swap
 in a real Minecraftia font asset later if you want it pixel-perfect.
 
-### Custom lever image
+### Custom images
 
-Uploaded your own redstone switch? Paste the asset id into `LEVER_ON_IMAGE` (and
-optionally `LEVER_OFF_IMAGE`) at the top of the script. When `LEVER_ON_IMAGE` is
-set, the panel hides the drawn lever and shows your image instead, swapping it on
-toggle. Leave both blank to keep the native drawn lever.
+The panel uses uploaded Minecraft textures, set at the top of the script:
+
+- `LEVER_ON_IMAGE` — lever **up** (enabled)
+- `LEVER_OFF_IMAGE` — lever **down** (disabled)
+- `DUST_IMAGE` — redstone-dust indicator in the header; it's tinted every frame,
+  so it sits dim red when off and pulses bright red while the booster is powered.
+
+Blank out `LEVER_ON_IMAGE` to fall back to the drawn (native) lever.
 
 ## Normal vs Carry speed
 
