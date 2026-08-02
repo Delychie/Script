@@ -46,9 +46,9 @@ local MAX_SPEED = 1000
 local TOGGLE_KEY = Enum.KeyCode.RightShift
 local PRESETS = { 16, 32, 60, 100, 200 }
 
--- Uploaded redstone-lever images: ON = lever up, OFF = lever down.
-local LEVER_ON_IMAGE = "rbxassetid://130564537890360"
-local LEVER_OFF_IMAGE = "rbxassetid://102532019315855"
+-- Uploaded redstone-lever images: starts up (off), flips down when activated.
+local LEVER_ON_IMAGE = "rbxassetid://102532019315855"  -- lever down = ON
+local LEVER_OFF_IMAGE = "rbxassetid://130564537890360" -- lever up = OFF
 -- Redstone-dust image in the header (replaces the drawn indicator).
 local DUST_IMAGE = "rbxassetid://83833754384535"
 
