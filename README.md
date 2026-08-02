@@ -1,4 +1,4 @@
-# Speed Booster
+# Dely Booster Test 67
 
 A LocalScript speed booster for Roblox with a small on-screen panel.
 
