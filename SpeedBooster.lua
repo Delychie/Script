@@ -92,6 +92,17 @@ local linearVelocity: LinearVelocity? = nil
 local counterGui: BillboardGui? = nil
 local counterLabel: TextLabel? = nil
 
+-- Speed-counter (head readout) state
+local counterEnabled = false
+local prevSpeed = 0
+local speedAnimActive = false
+local lastSpeedFlash = 0
+local counterScanT = 0
+local COUNTER_BASE_Y = 2.6 -- studs above the head when nothing else is up there
+local BB_NORMAL = UDim2.fromOffset(150, 40)
+local BB_MID = UDim2.fromOffset(162, 44)
+local BB_BIG = UDim2.fromOffset(174, 48)
+
 --==============================================================
 -- Physics
 --==============================================================
@@ -161,9 +172,9 @@ local function buildCounter()
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "SpeedBoosterCounter"
 	billboard.Adornee = head
-	billboard.Size = UDim2.fromOffset(150, 40)
-	billboard.StudsOffsetWorldSpace = Vector3.new(0, 2.6, 0)
-	billboard.AlwaysOnTop = true
+	billboard.Size = BB_NORMAL
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, COUNTER_BASE_Y, 0)
+	billboard.AlwaysOnTop = true -- render over other head GUIs
 	billboard.MaxDistance = 200
 	billboard.Enabled = false
 	billboard.Parent = head
@@ -261,6 +272,58 @@ local function measureHorizontalSpeed(): number
 	return Vector3.new(assemblyVelocity.X, 0, assemblyVelocity.Z).Magnitude
 end
 
+-- del-hub-style flash: on a sharp speed increase the readout punches bigger and
+-- flashes red (big spike) or light-red (smaller spike), then eases back to white.
+local function triggerSpeedFlash(big: boolean)
+	if speedAnimActive then
+		return
+	end
+	local bb = counterGui
+	local label = counterLabel
+	if not bb or not label then
+		return
+	end
+	local now = tick()
+	if now - lastSpeedFlash < 0.18 then
+		return
+	end
+	lastSpeedFlash = now
+	speedAnimActive = true
+
+	local flashCol = big and RED_BRIGHT or Color3.fromRGB(255, 120, 120)
+	local punchSize = big and BB_BIG or BB_MID
+	TweenService:Create(bb, TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = punchSize }):Play()
+	TweenService:Create(label, TweenInfo.new(0.07), { TextColor3 = flashCol, TextStrokeTransparency = 0.1 }):Play()
+	task.delay(0.1, function()
+		if counterGui and counterLabel then
+			TweenService:Create(counterGui, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = BB_NORMAL }):Play()
+			TweenService:Create(counterLabel, TweenInfo.new(0.2), { TextColor3 = Color3.fromRGB(255, 255, 255), TextStrokeTransparency = 0.3 }):Play()
+		end
+		task.delay(0.22, function()
+			speedAnimActive = false
+		end)
+	end)
+end
+
+-- Finds how high (in studs) any OTHER head billboard/text reaches, so we can sit
+-- above it instead of overlapping it.
+local function otherHeadTopY(): number
+	local top = COUNTER_BASE_Y
+	local c = character
+	if not c then
+		return top
+	end
+	for _, d in ipairs(c:GetDescendants()) do
+		if d ~= counterGui and d:IsA("BillboardGui") and d.Enabled then
+			local y = math.max(d.StudsOffsetWorldSpace.Y, d.StudsOffset.Y) + 1.0
+			if y > top then
+				top = y
+			end
+		end
+	end
+	return top
+end
+
 local function updateCounter()
 	local billboard = counterGui
 	local label = counterLabel
@@ -268,20 +331,33 @@ local function updateCounter()
 		return
 	end
 
-	if not enabled then
+	if not counterEnabled then
 		billboard.Enabled = false
 		return
 	end
+	billboard.Enabled = true
 
 	local current = measureHorizontalSpeed()
-	label.Text = string.format("%d", math.round(current))
+	label.Text = tostring(math.round(current))
 
-	-- Powered-redstone red while the mover is actively pushing, dimmed when idle.
-	local pushing = linearVelocity ~= nil and linearVelocity.Enabled
-	label.TextColor3 = pushing and Color3.fromRGB(255, 70, 70)
-		or Color3.fromRGB(210, 210, 215)
+	-- del-hub flash on acceleration
+	local delta = current - prevSpeed
+	prevSpeed = current
+	if delta > 18 then
+		triggerSpeedFlash(true)
+	elseif delta > 6 then
+		triggerSpeedFlash(false)
+	end
 
-	billboard.Enabled = true
+	-- overlay: float above any other nametag / speed counter on the head
+	local now = tick()
+	if now - counterScanT > 0.35 then
+		counterScanT = now
+		local target = Vector3.new(0, otherHeadTopY(), 0)
+		if math.abs(billboard.StudsOffsetWorldSpace.Y - target.Y) > 0.05 then
+			billboard.StudsOffsetWorldSpace = target
+		end
+	end
 end
 
 RunService.Heartbeat:Connect(function()
@@ -407,8 +483,8 @@ gui.Parent = playerGui
 
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
-panel.Size = UDim2.fromOffset(250, 226)
-panel.Position = UDim2.new(0, 24, 0.5, -113)
+panel.Size = UDim2.fromOffset(250, 262)
+panel.Position = UDim2.new(0, 24, 0.5, -131)
 panel.BackgroundColor3 = STONE_TOP
 panel.BorderSizePixel = 0
 panel.Active = true
@@ -477,7 +553,7 @@ table.insert(redstoneLines, sep)
 -- reads like a real Minecraft window (outer slab + sunken content area).
 local body = Instance.new("Frame")
 body.Name = "Body"
-body.Size = UDim2.new(1, -20, 0, 150)
+body.Size = UDim2.new(1, -20, 0, 188)
 body.Position = UDim2.fromOffset(10, 48)
 body.BackgroundColor3 = Color3.fromRGB(20, 20, 22)
 body.BorderSizePixel = 0
@@ -490,7 +566,7 @@ addBevel(body, BEVEL_LO, BEVEL_HI) -- inset (sunken) bevel
 local function makeSpeedRow(name: string, labelText: string, defaultValue: number, y: number)
 	local row = Instance.new("Frame")
 	row.Name = name .. "Row"
-	row.Size = UDim2.new(1, -20, 0, 34)
+	row.Size = UDim2.new(1, -20, 0, 32)
 	row.Position = UDim2.fromOffset(10, y)
 	row.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 	row.BorderSizePixel = 0
@@ -556,7 +632,7 @@ local carryBox, carryLabel, carryBoxScale = makeSpeedRow("Carry", "CARRY SPEED",
 local presetRow = Instance.new("Frame")
 presetRow.Name = "Presets"
 presetRow.Size = UDim2.new(1, -20, 0, 26)
-presetRow.Position = UDim2.fromOffset(10, 130)
+presetRow.Position = UDim2.fromOffset(10, 128)
 presetRow.BackgroundTransparency = 1
 presetRow.ZIndex = 2
 presetRow.Parent = panel
@@ -569,8 +645,8 @@ presetLayout.Parent = presetRow
 -- Toggle row with a redstone lever -----------------------------
 local toggleRow = Instance.new("Frame")
 toggleRow.Name = "ToggleRow"
-toggleRow.Size = UDim2.new(1, -20, 0, 36)
-toggleRow.Position = UDim2.fromOffset(10, 162)
+toggleRow.Size = UDim2.new(1, -20, 0, 32)
+toggleRow.Position = UDim2.fromOffset(10, 160)
 toggleRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 toggleRow.BorderSizePixel = 0
 toggleRow.ZIndex = 2
@@ -642,7 +718,7 @@ if useLeverImage then
 	local img = Instance.new("ImageLabel")
 	img.Name = "LeverImage"
 	img.AnchorPoint = Vector2.new(1, 0.5)
-	img.Size = UDim2.fromOffset(42, 42)
+	img.Size = UDim2.fromOffset(34, 34)
 	img.Position = UDim2.new(1, -8, 0.5, 0)
 	img.BackgroundTransparency = 1
 	img.ScaleType = Enum.ScaleType.Fit
@@ -664,11 +740,72 @@ leverButton.AutoButtonColor = false
 leverButton.ZIndex = 6
 leverButton.Parent = toggleRow
 
+-- Speed Counter row (Minecraft-styled slide switch) ------------
+local counterRow = Instance.new("Frame")
+counterRow.Name = "CounterRow"
+counterRow.Size = UDim2.new(1, -20, 0, 32)
+counterRow.Position = UDim2.fromOffset(10, 198)
+counterRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
+counterRow.BorderSizePixel = 0
+counterRow.ZIndex = 2
+counterRow.Parent = panel
+addBevel(counterRow, BEVEL_HI, BEVEL_LO)
+counterRow.MouseEnter:Connect(function()
+	TweenService:Create(counterRow, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(46, 46, 52) }):Play()
+end)
+counterRow.MouseLeave:Connect(function()
+	TweenService:Create(counterRow, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(34, 34, 38) }):Play()
+end)
+
+local counterLabelUi = Instance.new("TextLabel")
+counterLabelUi.Name = "Label"
+counterLabelUi.Size = UDim2.new(0.6, 0, 1, 0)
+counterLabelUi.Position = UDim2.fromOffset(10, 0)
+counterLabelUi.BackgroundTransparency = 1
+counterLabelUi.Text = "SPEED COUNTER"
+counterLabelUi.Font = FONT
+counterLabelUi.TextSize = 15
+counterLabelUi.TextXAlignment = Enum.TextXAlignment.Left
+counterLabelUi.TextColor3 = TEXT
+counterLabelUi.ZIndex = 3
+counterLabelUi.Parent = counterRow
+
+-- Minecraft slide switch: inset stone track + a redstone-block knob that lights
+-- up and slides right when on.
+local swTrack = Instance.new("Frame")
+swTrack.Name = "SwitchTrack"
+swTrack.AnchorPoint = Vector2.new(1, 0.5)
+swTrack.Size = UDim2.fromOffset(44, 18)
+swTrack.Position = UDim2.new(1, -10, 0.5, 0)
+swTrack.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+swTrack.BorderSizePixel = 0
+swTrack.ZIndex = 3
+swTrack.Parent = counterRow
+addBevel(swTrack, BEVEL_LO, BEVEL_HI) -- inset track
+
+local swKnob = Instance.new("Frame")
+swKnob.Name = "SwitchKnob"
+swKnob.Size = UDim2.fromOffset(16, 16)
+swKnob.Position = UDim2.new(0, 1, 0.5, -8) -- off (left)
+swKnob.BackgroundColor3 = Color3.fromRGB(70, 70, 76) -- stone (off)
+swKnob.BorderSizePixel = 0
+swKnob.ZIndex = 4
+swKnob.Parent = swTrack
+addBevel(swKnob, Color3.fromRGB(104, 104, 112), Color3.fromRGB(34, 34, 38)) -- raised block
+
+local counterButton = Instance.new("TextButton")
+counterButton.Size = UDim2.fromScale(1, 1)
+counterButton.BackgroundTransparency = 1
+counterButton.Text = ""
+counterButton.AutoButtonColor = false
+counterButton.ZIndex = 6
+counterButton.Parent = counterRow
+
 -- Mode readout / hint -----------------------------------------
 local hint = Instance.new("TextLabel")
 hint.Name = "Hint"
 hint.Size = UDim2.new(1, -20, 0, 16)
-hint.Position = UDim2.fromOffset(10, 202)
+hint.Position = UDim2.fromOffset(10, 238)
 hint.BackgroundTransparency = 1
 hint.Text = "RIGHTSHIFT TO TOGGLE"
 hint.Font = FONT
@@ -777,11 +914,30 @@ local function setEnabled(value: boolean)
 			linearVelocity.Enabled = false
 			linearVelocity.PlaneVelocity = Vector2.zero
 		end
-		if counterGui then
-			counterGui.Enabled = false
-		end
 	end
 	updateMode()
+end
+
+-- Speed Counter toggle: shows/hides the head readout (independent of the boost).
+local function animCounterSwitch(on: boolean)
+	TweenService:Create(swKnob, TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Position = on and UDim2.new(1, -17, 0.5, -8) or UDim2.new(0, 1, 0.5, -8),
+	}):Play()
+	TweenService:Create(swKnob, TweenInfo.new(0.16), {
+		BackgroundColor3 = on and RED_BRIGHT or Color3.fromRGB(70, 70, 76),
+	}):Play()
+	counterLabelUi.TextColor3 = on and RED_BRIGHT or TEXT
+end
+
+local function setCounterEnabled(value: boolean)
+	counterEnabled = value
+	animCounterSwitch(value)
+	if value then
+		prevSpeed = measureHorizontalSpeed() -- avoid a false flash on the first frame
+	end
+	if counterGui then
+		counterGui.Enabled = value
+	end
 end
 
 -- Validated commit, shared by both speed boxes.
@@ -849,6 +1005,10 @@ leverButton.Activated:Connect(function()
 	setEnabled(not enabled)
 end)
 
+counterButton.Activated:Connect(function()
+	setCounterEnabled(not counterEnabled)
+end)
+
 UserInputService.InputBegan:Connect(function(input, processed)
 	if processed then
 		return
@@ -873,6 +1033,7 @@ onCarryChanged = function()
 	end
 end
 setEnabled(false)
+setCounterEnabled(false)
 
 -- intro: grow the panel in
 punch(panelScale, 0.8)

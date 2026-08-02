@@ -17,6 +17,9 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
 - **Presets** — 16 / 32 / 60 / 100 / 200 cobblestone buttons (set the Normal speed).
 - **Lever** — flip it to toggle the boost; the lamp, knob and border light up
   red ("powered"). `RightShift` toggles it too.
+- **Speed Counter** — a Minecraft-style slide switch (stone track + redstone-block
+  knob that lights up and slides right when on). Turns the head readout on/off,
+  independent of the boost.
 - The readout at the bottom shows the live mode (`Normal` / `Carrying`).
 - The panel is draggable.
 
@@ -62,14 +65,21 @@ brainrot:
   readout. No input from you is needed — walk into a steal and it switches,
   drop it and it switches back.
 
-## Head counter
+## Head counter (Speed Counter toggle)
 
-While the boost is ON, a `BillboardGui` floats above your head showing your
-real horizontal speed in studs/sec — measured from
+Toggle the **Speed Counter** switch and a `BillboardGui` floats above your head
+showing your real horizontal speed in studs/sec — measured from
 `HumanoidRootPart.AssemblyLinearVelocity` with the Y component dropped, so
-falling never inflates it. It turns green while the constraint is actively
-pushing and grey when you are coasting, and hides entirely when the boost is
-OFF. It is created client-side, so no other player sees it.
+falling never inflates it. It's independent of the boost, uses the Arcade font,
+and is client-side so no other player sees it.
+
+- **Color logic (del-hub style):** the number sits white, and on a sharp
+  acceleration it punches bigger and flashes — bright red on a big spike
+  (Δ > 18), light red on a smaller one (Δ > 6) — then eases back to white.
+- **Overlay:** it scans your character for any other `BillboardGui` (nametags,
+  other speed counters, custom text) and parks itself just above the highest one
+  (re-checked ~3×/sec), with `AlwaysOnTop` so it renders over them. If nothing
+  else is up there it sits at `COUNTER_BASE_Y` (2.6 studs).
 
 ## How it moves the character
 
