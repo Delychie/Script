@@ -1,10 +1,4 @@
 --!nonstrict
--- dely booster test 67
--- moves you with a LinearVelocity on the HRP (plane mode, X/Z only) instead of
--- touching Velocity, so gravity/jumps stay normal. two speeds: normal, and a
--- slower one for when you're carrying a brainrot (detected off WalkSpeed +
--- the Stealing attribute). redstone panel + a head speed counter on top.
--- lever/dust image ids are in the config block. LocalScript / executor.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -15,45 +9,32 @@ local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
---==============================================================
--- Config
---==============================================================
-
 local DEFAULT_NORMAL_SPEED = 60
 local DEFAULT_CARRY_SPEED = 27
 local MIN_SPEED = 0
 local MAX_SPEED = 1000
-local CONFIG_FILE = "dely_booster_test67.json" -- auto-saved settings
+local CONFIG_FILE = "dely_booster_test67.json"
 
--- Uploaded redstone-lever images: starts up (off), flips down when activated.
-local LEVER_ON_IMAGE = "rbxassetid://102532019315855"  -- lever down = ON
-local LEVER_OFF_IMAGE = "rbxassetid://130564537890360" -- lever up = OFF
--- Redstone-dust image in the header (replaces the drawn indicator).
+local LEVER_ON_IMAGE = "rbxassetid://102532019315855"
+local LEVER_OFF_IMAGE = "rbxassetid://130564537890360"
+
 local DUST_IMAGE = "rbxassetid://83833754384535"
 
--- The game drops your WalkSpeed below this while you carry a brainrot; that's
--- how we detect the carry state (alongside the "Stealing" attribute).
 local CARRY_WALKSPEED_MAX = 25
 
---==============================================================
--- Redstone theme palette
---==============================================================
-
-local STONE_TOP   = Color3.fromRGB(46, 46, 50)   -- deepslate, top of the slab
-local STONE_BOT   = Color3.fromRGB(24, 24, 26)   -- darker toward the bottom
-local SLOT        = Color3.fromRGB(18, 18, 20)   -- inset slot fill
-local BEVEL_HI    = Color3.fromRGB(78, 78, 84)   -- light pixel edge (top/left)
-local BEVEL_LO    = Color3.fromRGB(10, 10, 12)   -- dark pixel edge (bottom/right)
-local REDDISH_BLACK = Color3.fromRGB(40, 7, 7)    -- unpowered (border sits here)
+local STONE_TOP   = Color3.fromRGB(46, 46, 50)
+local STONE_BOT   = Color3.fromRGB(24, 24, 26)
+local SLOT        = Color3.fromRGB(18, 18, 20)
+local BEVEL_HI    = Color3.fromRGB(78, 78, 84)
+local BEVEL_LO    = Color3.fromRGB(10, 10, 12)
+local REDDISH_BLACK = Color3.fromRGB(40, 7, 7)
 local CRIMSON       = Color3.fromRGB(178, 20, 48)
 local RED           = Color3.fromRGB(235, 22, 22)
 local SCARLET       = Color3.fromRGB(255, 62, 28)
-local RED_DIM     = REDDISH_BLACK                 -- unpowered redstone dust/border
-local RED_BRIGHT  = Color3.fromRGB(255, 48, 48)  -- powered redstone dust
+local RED_DIM     = REDDISH_BLACK
+local RED_BRIGHT  = Color3.fromRGB(255, 48, 48)
 local RED_MID     = Color3.fromRGB(200, 30, 30)
 
--- Powered border surge: flows through reddish-black -> crimson -> red -> scarlet
--- and back. Endpoints match so rotating it loops seamlessly.
 local SURGE_SEQ = ColorSequence.new({
 	ColorSequenceKeypoint.new(0.00, REDDISH_BLACK),
 	ColorSequenceKeypoint.new(0.25, CRIMSON),
@@ -64,16 +45,12 @@ local SURGE_SEQ = ColorSequence.new({
 })
 local TEXT        = Color3.fromRGB(228, 228, 232)
 local SUBTEXT     = Color3.fromRGB(150, 150, 156)
-local FONT        = Enum.Font.Arcade -- blocky, fits the mc vibe
-
---==============================================================
--- State
---==============================================================
+local FONT        = Enum.Font.Arcade
 
 local enabled = false
 local normalSpeed = DEFAULT_NORMAL_SPEED
 local carrySpeed = DEFAULT_CARRY_SPEED
-local carrying = false -- true while a brainrot is being carried
+local carrying = false
 
 local character: Model? = nil
 local humanoid: Humanoid? = nil
@@ -86,21 +63,19 @@ local linearVelocity: LinearVelocity? = nil
 local counterGui: BillboardGui? = nil
 local counterLabel: TextLabel? = nil
 
--- Speed-counter (head readout) state
 local counterEnabled = false
 local prevSpeed = 0
 local speedAnimActive = false
 local lastSpeedFlash = 0
 local counterScanT = 0
-local lastShownSpeed = -1 -- only rewrite the number when it changes
-local COUNTER_BASE_Y = 2.6 -- studs above the head when nothing else is up there
+local lastShownSpeed = -1
+local COUNTER_BASE_Y = 2.6
 local BB_NORMAL = UDim2.fromOffset(150, 40)
 local BB_MID = UDim2.fromOffset(162, 44)
 local BB_BIG = UDim2.fromOffset(174, 48)
 
--- Config persistence (executor filesystem)
-local savedGuiPos = nil -- {xScale, xOffset, yScale, yOffset}
-local suppressSave = false -- true while applying loaded values, so we don't re-save
+local savedGuiPos = nil
+local suppressSave = false
 local canPersist = typeof(writefile) == "function"
 	and typeof(readfile) == "function"
 	and typeof(isfile) == "function"
@@ -134,10 +109,6 @@ local function loadConfig()
 	return nil
 end
 
---==============================================================
--- Physics
---==============================================================
-
 local function teardownMover()
 	if linearVelocity then
 		linearVelocity:Destroy()
@@ -149,7 +120,6 @@ local function teardownMover()
 	end
 end
 
--- Builds the Attachment + LinearVelocity pair on the current HumanoidRootPart.
 local function buildMover()
 	teardownMover()
 	if not rootPart then
@@ -165,11 +135,9 @@ local function buildMover()
 	newVelocity.Attachment0 = newAttachment
 	newVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
 
-	-- Plane mode: the solver only acts inside the plane we define below, so the
-	-- Y axis is left completely untouched (force on Y is effectively 0).
 	newVelocity.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
-	newVelocity.PrimaryTangentAxis = Vector3.new(1, 0, 0)   -- world X
-	newVelocity.SecondaryTangentAxis = Vector3.new(0, 0, 1) -- world Z
+	newVelocity.PrimaryTangentAxis = Vector3.new(1, 0, 0)
+	newVelocity.SecondaryTangentAxis = Vector3.new(0, 0, 1)
 
 	newVelocity.MaxForce = math.huge
 	newVelocity.PlaneVelocity = Vector2.zero
@@ -180,10 +148,6 @@ local function buildMover()
 	linearVelocity = newVelocity
 end
 
---==============================================================
--- Head counter
---==============================================================
-
 local function teardownCounter()
 	if counterGui then
 		counterGui:Destroy()
@@ -192,8 +156,6 @@ local function teardownCounter()
 	end
 end
 
--- Floating readout above the head. Created on the client only, so nobody else
--- sees it.
 local function buildCounter()
 	teardownCounter()
 	if not head then
@@ -205,12 +167,11 @@ local function buildCounter()
 	billboard.Adornee = head
 	billboard.Size = BB_NORMAL
 	billboard.StudsOffsetWorldSpace = Vector3.new(0, COUNTER_BASE_Y, 0)
-	billboard.AlwaysOnTop = true -- render over other head GUIs
+	billboard.AlwaysOnTop = true
 	billboard.MaxDistance = 200
 	billboard.Enabled = false
 	billboard.Parent = head
 
-	-- Minecraft nametag-style plate: dark translucent slab with a redstone edge.
 	local plate = Instance.new("Frame")
 	plate.Name = "Plate"
 	plate.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -256,13 +217,6 @@ local function onCharacterAdded(newCharacter: Model)
 	buildCounter()
 end
 
---==============================================================
--- Carry / Normal speed
---==============================================================
-
--- True while a brainrot is being carried. The game slows the character's
--- WalkSpeed below CARRY_WALKSPEED_MAX (but keeps it above 0) and/or sets a
--- "Stealing" attribute on the player while carrying, so we read both.
 local function isCarryingBrainrot(): boolean
 	if player:GetAttribute("Stealing") == true then
 		return true
@@ -273,7 +227,6 @@ local function isCarryingBrainrot(): boolean
 	return false
 end
 
--- The two speeds, as their own functions.
 local function getNormalSpeed(): number
 	return normalSpeed
 end
@@ -281,7 +234,6 @@ local function getCarrySpeed(): number
 	return carrySpeed
 end
 
--- Speed to apply this frame: Carry while holding a brainrot, Normal otherwise.
 local function getActiveSpeed(): number
 	if carrying then
 		return getCarrySpeed()
@@ -289,15 +241,8 @@ local function getActiveSpeed(): number
 	return getNormalSpeed()
 end
 
--- Assigned by the UI so a pick-up / drop updates the panel's mode readout.
 local onCarryChanged: (() -> ())? = nil
 
---==============================================================
--- Movement loop
---==============================================================
-
--- Actual horizontal speed the character is travelling at, in studs/sec. Y is
--- dropped so falling never inflates the number.
 local function measureHorizontalSpeed(): number
 	if not rootPart then
 		return 0
@@ -306,8 +251,6 @@ local function measureHorizontalSpeed(): number
 	return Vector3.new(assemblyVelocity.X, 0, assemblyVelocity.Z).Magnitude
 end
 
--- del-hub-style flash: on a sharp speed increase the readout punches bigger and
--- flashes red (big spike) or light-red (smaller spike), then eases back to white.
 local function triggerSpeedFlash(big: boolean)
 	if speedAnimActive then
 		return
@@ -339,8 +282,6 @@ local function triggerSpeedFlash(big: boolean)
 	end)
 end
 
--- Finds how high (in studs) any OTHER head billboard/text reaches, so we can sit
--- above it instead of overlapping it.
 local function otherHeadTopY(): number
 	local top = COUNTER_BASE_Y
 	local c = character
@@ -378,7 +319,6 @@ local function updateCounter()
 		lastShownSpeed = rounded
 	end
 
-	-- del-hub flash on acceleration
 	local delta = current - prevSpeed
 	prevSpeed = current
 	if delta > 18 then
@@ -387,7 +327,6 @@ local function updateCounter()
 		triggerSpeedFlash(false)
 	end
 
-	-- overlay: float above any other nametag / speed counter on the head
 	local now = tick()
 	if now - counterScanT > 0.35 then
 		counterScanT = now
@@ -399,7 +338,7 @@ local function updateCounter()
 end
 
 RunService.Heartbeat:Connect(function()
-	-- Detect pick-up / drop every frame and switch modes when it changes.
+
 	local nowCarrying = isCarryingBrainrot()
 	if nowCarrying ~= carrying then
 		carrying = nowCarrying
@@ -423,26 +362,17 @@ RunService.Heartbeat:Connect(function()
 
 	local moveDirection = humanoid.MoveDirection
 	if moveDirection.Magnitude <= 0.01 then
-		-- No input: hand control back to the Humanoid so the character can stop,
-		-- fall and be pushed around like usual.
+
 		velocity.Enabled = false
 		velocity.PlaneVelocity = Vector2.zero
 		return
 	end
 
-	-- Carry Speed while holding a brainrot, Normal Speed otherwise. X and Z
-	-- only -- Y never gets a component, so gravity is untouched.
 	local spd = getActiveSpeed()
 	velocity.PlaneVelocity = Vector2.new(moveDirection.X * spd, moveDirection.Z * spd)
 	velocity.Enabled = true
 end)
 
---==============================================================
--- UI helpers (Minecraft pixel bevels + powered redstone border)
---==============================================================
-
--- Rounds a corner and (optionally) gives it a soft edge stroke. Replaces the old
--- square pixel bevels so everything reads smooth.
 local function round(inst: GuiObject, radius: number)
 	local c = Instance.new("UICorner")
 	c.CornerRadius = UDim.new(0, radius)
@@ -459,7 +389,6 @@ local function edgeStroke(inst: GuiObject, color: Color3, thickness: number?, tr
 	return s
 end
 
--- Snappy scale pop: set to `from`, spring back to 1. Used all over for feedback.
 local function punch(scale: UIScale, from: number)
 	scale.Scale = from
 	TweenService:Create(scale, TweenInfo.new(0.24, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
@@ -467,7 +396,6 @@ local function punch(scale: UIScale, from: number)
 	}):Play()
 end
 
--- Damped rotational shake, eased out. Used on load for the redstone dust + lever.
 local function shake(gui: GuiObject?, amplitude: number, duration: number)
 	if not gui then
 		return
@@ -484,26 +412,20 @@ local function shake(gui: GuiObject?, amplitude: number, duration: number)
 	end)
 end
 
--- Redstone dust border: dim when unpowered, glows/pulses red while the booster
--- is enabled (the whole "circuit" powers on together). Frames added to
--- redstoneLines get tinted the same way (used by the separator).
 local redstoneLines: { Frame } = {}
-local redstoneImages: { ImageLabel } = {} -- tinted via ImageColor3
-local powerSurge = 0 -- brief flash to full brightness when the booster is switched on
+local redstoneImages: { ImageLabel } = {}
+local powerSurge = 0
 
--- The big panel border: reddish-black + still when unpowered, a flowing
--- crimson/scarlet gradient surge when powered. Assigned when the panel is built.
 local panelBorder: UIStroke? = nil
 local panelBorderGrad: UIGradient? = nil
-local PANEL_BORDER_BASE = 3 -- overflows the panel edge a little
-local borderSpin = 0 -- extra rotation velocity injected on activate; decays to the steady flow
+local PANEL_BORDER_BASE = 3
+local borderSpin = 0
 
 do
 	local t = 0
-	local idleApplied = false -- when off + not animating, we stop writing every frame (FPS)
+	local idleApplied = false
 	RunService.Heartbeat:Connect(function(dt)
-		-- Fully idle (booster off, no surge/spin-down running): apply the off-state
-		-- once, then do nothing each frame until something changes.
+
 		if not enabled and powerSurge <= 0.001 and math.abs(borderSpin) <= 0.5 then
 			if not idleApplied then
 				idleApplied = true
@@ -522,10 +444,9 @@ do
 		idleApplied = false
 
 		t += dt
-		powerSurge = math.max(0, powerSurge - dt * 2.5) -- decays after a switch-on
-		borderSpin = borderSpin - borderSpin * math.min(dt * 3.5, 1) -- decays to 0
-		-- Only glow while powered (enabled); otherwise sit at the dim, unpowered red.
-		-- The surge briefly overrides the sine so a flick flashes bright.
+		powerSurge = math.max(0, powerSurge - dt * 2.5)
+		borderSpin = borderSpin - borderSpin * math.min(dt * 3.5, 1)
+
 		local glow = enabled and math.max(0.5 + 0.5 * math.sin(t * 4), powerSurge) or 0
 		local col = RED_DIM:Lerp(RED_BRIGHT, glow)
 		for i = #redstoneLines, 1, -1 do
@@ -537,11 +458,10 @@ do
 			if img.Parent then img.ImageColor3 = col else table.remove(redstoneImages, i) end
 		end
 
-		-- panel border: powered = flowing gradient surge; off = still reddish-black
 		if panelBorder and panelBorderGrad then
 			if enabled then
 				panelBorderGrad.Enabled = true
-				panelBorder.Color = Color3.fromRGB(255, 255, 255) -- let the gradient show
+				panelBorder.Color = Color3.fromRGB(255, 255, 255)
 				panelBorderGrad.Rotation = (panelBorderGrad.Rotation + (100 + borderSpin) * dt) % 360
 				panelBorder.Thickness = PANEL_BORDER_BASE + math.sin(t * 6) * 0.8 + powerSurge * 2 + borderSpin * 0.004
 			else
@@ -553,18 +473,12 @@ do
 	end)
 end
 
---==============================================================
--- UI
---==============================================================
-
 local gui = Instance.new("ScreenGui")
 gui.Name = "SpeedBoosterPanel"
 gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
--- Device sizing: bigger + tappable on mobile, normal on PC, clamped to fit the
--- viewport on small screens. Applied through panelScale (the panel's UIScale).
 local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
 local PANEL_W, PANEL_H = 250, 200
 local function computeScale(): number
@@ -578,7 +492,7 @@ local deviceScale = computeScale()
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
 panel.Size = UDim2.fromOffset(PANEL_W, PANEL_H)
-panel.AnchorPoint = Vector2.new(0, 0.5) -- scales/sits from left-center, stays on screen
+panel.AnchorPoint = Vector2.new(0, 0.5)
 panel.Position = UDim2.new(0, 24, 0.5, 0)
 panel.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
 panel.BorderSizePixel = 0
@@ -587,13 +501,11 @@ panel.Parent = gui
 
 local panelGradient = Instance.new("UIGradient")
 panelGradient.Rotation = 90
-panelGradient.Color = ColorSequence.new(Color3.fromRGB(30, 30, 34), Color3.fromRGB(14, 14, 16)) -- dark body
+panelGradient.Color = ColorSequence.new(Color3.fromRGB(30, 30, 34), Color3.fromRGB(14, 14, 16))
 panelGradient.Parent = panel
 
-round(panel, 12)                     -- smooth slab corners
+round(panel, 12)
 
--- Big redstone border that overflows the panel edge. Reddish-black + still when
--- off; a flowing crimson/scarlet gradient surge when powered (driven above).
 panelBorder = Instance.new("UIStroke")
 panelBorder.Thickness = PANEL_BORDER_BASE
 panelBorder.Color = REDDISH_BLACK
@@ -606,10 +518,9 @@ panelBorderGrad.Enabled = false
 panelBorderGrad.Parent = panelBorder
 
 local panelScale = Instance.new("UIScale")
-panelScale.Scale = deviceScale -- resting scale = device scale
+panelScale.Scale = deviceScale
 panelScale.Parent = panel
 
--- Panel scale pop that springs back to the device scale (not 1).
 local function panelPop(from: number)
 	panelScale.Scale = deviceScale * from
 	TweenService:Create(panelScale, TweenInfo.new(0.24, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
@@ -617,7 +528,6 @@ local function panelPop(from: number)
 	}):Play()
 end
 
--- Re-fit if the screen/viewport changes (rotation, window resize).
 do
 	local cam = workspace.CurrentCamera
 	if cam then
@@ -628,10 +538,9 @@ do
 	end
 end
 
--- Title row (in the dark body): dust indicator + title
 local dust = Instance.new("ImageLabel")
 dust.Name = "RedstoneDust"
-dust.AnchorPoint = Vector2.new(0.5, 0.5) -- center pivot so the load shake looks right
+dust.AnchorPoint = Vector2.new(0.5, 0.5)
 dust.Size = UDim2.fromOffset(20, 20)
 dust.Position = UDim2.new(0, 20, 0, 26)
 dust.BackgroundTransparency = 1
@@ -657,8 +566,6 @@ title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 title.ZIndex = 3
 title.Parent = panel
 
--- Speed rows --------------------------------------------------
--- Builds a "<label> ..... [ slot ]" stone row and returns the box + label.
 local function makeSpeedRow(name: string, labelText: string, defaultValue: number, y: number)
 	local row = Instance.new("Frame")
 	row.Name = name .. "Row"
@@ -669,7 +576,7 @@ local function makeSpeedRow(name: string, labelText: string, defaultValue: numbe
 	row.ZIndex = 2
 	row.Parent = panel
 	round(row, 6)
-	edgeStroke(row, Color3.fromRGB(62, 62, 70), 1, 0.25) -- soft raised rim
+	edgeStroke(row, Color3.fromRGB(62, 62, 70), 1, 0.25)
 
 	local label = Instance.new("TextLabel")
 	label.Name = "Label"
@@ -684,7 +591,6 @@ local function makeSpeedRow(name: string, labelText: string, defaultValue: numbe
 	label.ZIndex = 3
 	label.Parent = row
 
-	-- inventory-slot style box: inset bevel (dark top-left, light bottom-right)
 	local box = Instance.new("TextBox")
 	box.Name = "Box"
 	box.AnchorPoint = Vector2.new(1, 0.5)
@@ -701,11 +607,10 @@ local function makeSpeedRow(name: string, labelText: string, defaultValue: numbe
 	box.ZIndex = 3
 	box.Parent = row
 	round(box, 5)
-	edgeStroke(box, Color3.fromRGB(8, 8, 10), 1, 0) -- dark rim = pressed-in slot
+	edgeStroke(box, Color3.fromRGB(8, 8, 10), 1, 0)
 	local boxScale = Instance.new("UIScale")
 	boxScale.Parent = box
 
-	-- row hover: gently lighten the stone
 	local base = row.BackgroundColor3
 	row.MouseEnter:Connect(function()
 		TweenService:Create(row, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(46, 46, 52) }):Play()
@@ -714,7 +619,6 @@ local function makeSpeedRow(name: string, labelText: string, defaultValue: numbe
 		TweenService:Create(row, TweenInfo.new(0.12), { BackgroundColor3 = base }):Play()
 	end)
 
-	-- slot focus: pop + warm the fill (restore is handled by updateMode on blur)
 	box.Focused:Connect(function()
 		punch(boxScale, 1.14)
 		TweenService:Create(box, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(42, 20, 20) }):Play()
@@ -726,7 +630,6 @@ end
 local normalBox, normalLabel, normalBoxScale = makeSpeedRow("Normal", "NORMAL SPEED", DEFAULT_NORMAL_SPEED, 46)
 local carryBox, carryLabel, carryBoxScale = makeSpeedRow("Carry", "CARRY SPEED", DEFAULT_CARRY_SPEED, 84)
 
--- Toggle row with a redstone lever -----------------------------
 local toggleRow = Instance.new("Frame")
 toggleRow.Name = "ToggleRow"
 toggleRow.Size = UDim2.new(1, -20, 0, 32)
@@ -757,7 +660,6 @@ toggleLabel.TextColor3 = TEXT
 toggleLabel.ZIndex = 3
 toggleLabel.Parent = toggleRow
 
--- lever cobble base
 local leverBase = Instance.new("Frame")
 leverBase.Name = "LeverBase"
 leverBase.AnchorPoint = Vector2.new(1, 0.5)
@@ -770,7 +672,6 @@ leverBase.Parent = toggleRow
 round(leverBase, 4)
 edgeStroke(leverBase, Color3.fromRGB(24, 24, 28), 1, 0.2)
 
--- lever handle, pivots at the base, sits in the OFF position to start
 local handle = Instance.new("Frame")
 handle.Name = "Handle"
 handle.AnchorPoint = Vector2.new(0.5, 1)
@@ -783,7 +684,6 @@ handle.ZIndex = 4
 handle.Parent = leverBase
 round(handle, 3)
 
--- knob on top of the handle, the redstone tip that lights up when ON
 local knob = Instance.new("Frame")
 knob.Name = "Knob"
 knob.AnchorPoint = Vector2.new(0.5, 0)
@@ -793,14 +693,13 @@ knob.BackgroundColor3 = Color3.fromRGB(70, 22, 22)
 knob.BorderSizePixel = 0
 knob.ZIndex = 5
 knob.Parent = handle
-round(knob, 6) -- round redstone tip
+round(knob, 6)
 
--- If you uploaded a lever image, use it instead of the drawn one.
 local useLeverImage = LEVER_ON_IMAGE ~= ""
 local leverImage: ImageLabel? = nil
 local leverImageScale: UIScale? = nil
 if useLeverImage then
-	leverBase.Visible = false -- hide the drawn base/handle/knob
+	leverBase.Visible = false
 	local img = Instance.new("ImageLabel")
 	img.Name = "LeverImage"
 	img.AnchorPoint = Vector2.new(1, 0.5)
@@ -817,7 +716,6 @@ if useLeverImage then
 	leverImageScale = imgScale
 end
 
--- whole row is clickable
 local leverButton = Instance.new("TextButton")
 leverButton.Size = UDim2.fromScale(1, 1)
 leverButton.BackgroundTransparency = 1
@@ -826,7 +724,6 @@ leverButton.AutoButtonColor = false
 leverButton.ZIndex = 6
 leverButton.Parent = toggleRow
 
--- Speed Counter row (Minecraft-styled slide switch) ------------
 local counterRow = Instance.new("Frame")
 counterRow.Name = "CounterRow"
 counterRow.Size = UDim2.new(1, -20, 0, 32)
@@ -857,8 +754,6 @@ counterLabelUi.TextColor3 = TEXT
 counterLabelUi.ZIndex = 3
 counterLabelUi.Parent = counterRow
 
--- Minecraft slide switch: inset stone track + a redstone-block knob that lights
--- up and slides right when on.
 local swTrack = Instance.new("Frame")
 swTrack.Name = "SwitchTrack"
 swTrack.AnchorPoint = Vector2.new(1, 0.5)
@@ -868,18 +763,18 @@ swTrack.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
 swTrack.BorderSizePixel = 0
 swTrack.ZIndex = 3
 swTrack.Parent = counterRow
-round(swTrack, 9) -- pill track
+round(swTrack, 9)
 edgeStroke(swTrack, Color3.fromRGB(8, 8, 10), 1, 0.1)
 
 local swKnob = Instance.new("Frame")
 swKnob.Name = "SwitchKnob"
 swKnob.Size = UDim2.fromOffset(16, 16)
-swKnob.Position = UDim2.new(0, 1, 0.5, -8) -- off (left)
-swKnob.BackgroundColor3 = Color3.fromRGB(70, 70, 76) -- stone (off)
+swKnob.Position = UDim2.new(0, 1, 0.5, -8)
+swKnob.BackgroundColor3 = Color3.fromRGB(70, 70, 76)
 swKnob.BorderSizePixel = 0
 swKnob.ZIndex = 4
 swKnob.Parent = swTrack
-round(swKnob, 8) -- round knob
+round(swKnob, 8)
 
 local counterButton = Instance.new("TextButton")
 counterButton.Size = UDim2.fromScale(1, 1)
@@ -889,7 +784,6 @@ counterButton.AutoButtonColor = false
 counterButton.ZIndex = 6
 counterButton.Parent = counterRow
 
--- panel dragging (Frame.Draggable is dead so do it by hand)
 do
 	local dragging, dragStart, startPos = false, nil, nil
 	panel.InputBegan:Connect(function(input)
@@ -919,10 +813,6 @@ do
 	end)
 end
 
---==============================================================
--- UI behaviour
---==============================================================
-
 local function setNormalSpeed(value: number)
 	normalSpeed = math.clamp(value, MIN_SPEED, MAX_SPEED)
 	normalBox.Text = tostring(normalSpeed)
@@ -935,12 +825,11 @@ local function setCarrySpeed(value: number)
 	saveConfig()
 end
 
--- Flip the lever + warm the title when powered (dust pulses via the loop).
 local function animLever(on: boolean)
 	if useLeverImage and leverImage then
 		leverImage.Image = on and LEVER_ON_IMAGE
 			or ((LEVER_OFF_IMAGE ~= "" and LEVER_OFF_IMAGE) or LEVER_ON_IMAGE)
-		-- flip snap: squash into the swap, spring back
+
 		if leverImageScale then
 			punch(leverImageScale, 0.7)
 		end
@@ -952,20 +841,18 @@ local function animLever(on: boolean)
 			BackgroundColor3 = on and RED_BRIGHT or Color3.fromRGB(70, 22, 22),
 		}):Play()
 	end
-	-- (the header dust pulses via the redstone loop) title warms when powered
+
 	TweenService:Create(title, TweenInfo.new(0.18), {
 		TextColor3 = on and Color3.fromRGB(255, 232, 232) or Color3.fromRGB(245, 245, 248),
 	}):Play()
 end
 
--- Reflect the active mode: highlight whichever speed row is live and update the
--- readout. Called on enable/disable, on a value edit, and on every carry/drop.
 local function updateMode()
 	local normalActive = enabled and not carrying
 	local carryActive = enabled and carrying
 	normalLabel.TextColor3 = normalActive and RED_BRIGHT or TEXT
 	carryLabel.TextColor3 = carryActive and RED_BRIGHT or TEXT
-	-- energise the live slot with a faint warm-red fill
+
 	normalBox.BackgroundColor3 = normalActive and Color3.fromRGB(34, 16, 16) or SLOT
 	carryBox.BackgroundColor3 = carryActive and Color3.fromRGB(34, 16, 16) or SLOT
 end
@@ -975,10 +862,10 @@ local function setEnabled(value: boolean)
 	animLever(enabled)
 
 	if enabled then
-		powerSurge = 1          -- flash the whole circuit bright
-		panelPop(1.03)          -- little power "thunk" (respects device scale)
-		borderSpin = 1000       -- gradient whirls in fast, then eases to the steady flow
-		if panelBorder then     -- and fades in as it charges up
+		powerSurge = 1
+		panelPop(1.03)
+		borderSpin = 1000
+		if panelBorder then
 			panelBorder.Transparency = 1
 			TweenService:Create(panelBorder, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 				Transparency = 0,
@@ -990,14 +877,13 @@ local function setEnabled(value: boolean)
 			linearVelocity.PlaneVelocity = Vector2.zero
 		end
 		if panelBorder then
-			panelBorder.Transparency = 0 -- reddish-black border stays visible when off
+			panelBorder.Transparency = 0
 		end
 	end
 	updateMode()
 	saveConfig()
 end
 
--- Speed Counter toggle: shows/hides the head readout (independent of the boost).
 local function animCounterSwitch(on: boolean)
 	TweenService:Create(swKnob, TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 		Position = on and UDim2.new(1, -17, 0.5, -8) or UDim2.new(0, 1, 0.5, -8),
@@ -1012,7 +898,7 @@ local function setCounterEnabled(value: boolean)
 	counterEnabled = value
 	animCounterSwitch(value)
 	if value then
-		prevSpeed = measureHorizontalSpeed() -- avoid a false flash on the first frame
+		prevSpeed = measureHorizontalSpeed()
 	end
 	if counterGui then
 		counterGui.Enabled = value
@@ -1020,14 +906,13 @@ local function setCounterEnabled(value: boolean)
 	saveConfig()
 end
 
--- Validated commit, shared by both speed boxes.
 local function wireBox(box: TextBox, setter: (number) -> (), getter: () -> number)
 	box.FocusLost:Connect(function()
 		local value = tonumber(box.Text)
 		if value then
 			setter(value)
 		else
-			box.Text = tostring(getter()) -- reject junk input
+			box.Text = tostring(getter())
 		end
 		updateMode()
 	end)
@@ -1043,12 +928,6 @@ counterButton.Activated:Connect(function()
 	setCounterEnabled(not counterEnabled)
 end)
 
---==============================================================
--- Boot
---==============================================================
-
--- movement loop calls this on pick-up / drop: refresh the readout + pop the
--- slot that just became active.
 onCarryChanged = function()
 	updateMode()
 	if enabled then
@@ -1056,7 +935,6 @@ onCarryChanged = function()
 	end
 end
 
--- apply defaults, then load any saved config over the top (no re-saving while we do)
 suppressSave = true
 setNormalSpeed(DEFAULT_NORMAL_SPEED)
 setCarrySpeed(DEFAULT_CARRY_SPEED)
@@ -1076,7 +954,6 @@ if savedCfg then
 end
 suppressSave = false
 
--- intro: grow the panel in, then shake the redstone dust + lever as it powers up
 panelPop(0.8)
 task.delay(0.12, function()
 	shake(dust, 16, 0.6)
