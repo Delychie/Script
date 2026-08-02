@@ -1,7 +1,7 @@
 --!strict
 --[[
-	Speed Booster
-	-------------
+	Dely Booster Test 67  (Redstone theme)
+	--------------------------------------
 	LocalScript. Drop it in StarterPlayer > StarterPlayerScripts (or run it from
 	a client-side script runner).
 
@@ -20,16 +20,17 @@
 
 	Normal vs Carry: while you hold a brainrot the game slows your WalkSpeed and
 	sets a "Stealing" attribute. isCarryingBrainrot() reads that, and the mover
-	switches from Normal Speed to Carry Speed automatically (and back when you
-	drop it).
+	switches from Normal Speed to Carry Speed automatically (and back on drop).
 
-	Panel: draggable, has Normal/Carry speed boxes (+ quick presets) and a pill
-	toggle. RightShift toggles it as well.
+	Panel: a deepslate slab with pixel bevels and a redstone-dust border that
+	only powers on (glows red) while the booster is enabled. A lever toggles it;
+	RightShift does too. Draggable.
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -48,6 +49,22 @@ local PRESETS = { 16, 32, 60, 100, 200 }
 -- The game drops your WalkSpeed below this while you carry a brainrot; that's
 -- how we detect the carry state (alongside the "Stealing" attribute).
 local CARRY_WALKSPEED_MAX = 25
+
+--==============================================================
+-- Redstone theme palette
+--==============================================================
+
+local STONE_TOP   = Color3.fromRGB(46, 46, 50)   -- deepslate, top of the slab
+local STONE_BOT   = Color3.fromRGB(24, 24, 26)   -- darker toward the bottom
+local SLOT        = Color3.fromRGB(18, 18, 20)   -- inset slot fill
+local BEVEL_HI    = Color3.fromRGB(78, 78, 84)   -- light pixel edge (top/left)
+local BEVEL_LO    = Color3.fromRGB(10, 10, 12)   -- dark pixel edge (bottom/right)
+local RED_DIM     = Color3.fromRGB(92, 14, 14)   -- unpowered redstone dust
+local RED_BRIGHT  = Color3.fromRGB(255, 48, 48)  -- powered redstone dust
+local RED_MID     = Color3.fromRGB(200, 30, 30)
+local TEXT        = Color3.fromRGB(228, 228, 232)
+local SUBTEXT     = Color3.fromRGB(150, 150, 156)
+local FONT        = Enum.Font.Arcade -- closest built-in to the Minecraft look
 
 --==============================================================
 -- State
@@ -150,10 +167,10 @@ local function buildCounter()
 	label.Size = UDim2.fromScale(1, 1)
 	label.BackgroundTransparency = 1
 	label.Text = "0"
-	label.Font = Enum.Font.GothamBold
+	label.Font = FONT
 	label.TextScaled = true
 	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.TextStrokeTransparency = 0.35
+	label.TextStrokeTransparency = 0.3
 	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	label.Parent = billboard
 
@@ -235,10 +252,10 @@ local function updateCounter()
 	local current = measureHorizontalSpeed()
 	label.Text = string.format("%d", math.round(current))
 
-	-- Themed red glow while the mover is actively pushing, dimmed when idle.
+	-- Powered-redstone red while the mover is actively pushing, dimmed when idle.
 	local pushing = linearVelocity ~= nil and linearVelocity.Enabled
-	label.TextColor3 = pushing and Color3.fromRGB(255, 90, 90)
-		or Color3.fromRGB(225, 225, 235)
+	label.TextColor3 = pushing and Color3.fromRGB(255, 70, 70)
+		or Color3.fromRGB(210, 210, 215)
 
 	billboard.Enabled = true
 end
@@ -283,75 +300,64 @@ RunService.Heartbeat:Connect(function()
 end)
 
 --==============================================================
--- UI  (styled to match the del hub look: dark cards, animated
--- "spark" gradient borders, a pill toggle, and Gotham fonts)
+-- UI helpers (Minecraft pixel bevels + powered redstone border)
 --==============================================================
 
-local TweenService = game:GetService("TweenService")
-
--- Theme
-local PRIMARY       = Color3.fromRGB(200, 0, 0)
-local PRIMARY_LIGHT = Color3.fromRGB(255, 60, 60)
-local PRIMARY_DARK  = Color3.fromRGB(100, 0, 0)
-local BG            = Color3.fromRGB(12, 12, 14)
-local CARD          = Color3.fromRGB(22, 22, 26)
-local FIELD         = Color3.fromRGB(24, 24, 28)
-local TEXT          = Color3.fromRGB(230, 230, 230)
-local SUBTEXT       = Color3.fromRGB(170, 170, 180)
-
--- Animated "spark" gradient border, ported straight from the hub. Every stroke
--- created through addAnimatedStroke registers its gradient with one shared loop
--- that rotates them all in sync.
-local strokeRegistry = {}
-
-local function makeSparkSeq(p: Color3): ColorSequence
-	local white = Color3.fromRGB(255, 255, 255)
-	local function dim(c: Color3, a: number)
-		return c:Lerp(Color3.fromRGB(22, 22, 22), a)
+-- Draws a 2px pixel bevel: light top/left, dark bottom/right. Pass the colours
+-- swapped to get an inset (pressed-in) look for slots.
+local function addBevel(frame: GuiObject, hi: Color3, lo: Color3)
+	local function edge(size: UDim2, pos: UDim2, color: Color3)
+		local f = Instance.new("Frame")
+		f.Size = size
+		f.Position = pos
+		f.BackgroundColor3 = color
+		f.BorderSizePixel = 0
+		f.ZIndex = frame.ZIndex + 1
+		f.Parent = frame
 	end
-	return ColorSequence.new({
-		ColorSequenceKeypoint.new(0,    Color3.fromRGB(35, 35, 35)),
-		ColorSequenceKeypoint.new(0.30, Color3.fromRGB(55, 55, 55)),
-		ColorSequenceKeypoint.new(0.44, dim(p, 0.45)),
-		ColorSequenceKeypoint.new(0.48, p),
-		ColorSequenceKeypoint.new(0.50, p:Lerp(white, 0.35)),
-		ColorSequenceKeypoint.new(0.52, p),
-		ColorSequenceKeypoint.new(0.60, dim(p, 0.55)),
-		ColorSequenceKeypoint.new(0.75, Color3.fromRGB(55, 55, 55)),
-		ColorSequenceKeypoint.new(1,    Color3.fromRGB(35, 35, 35)),
-	})
+	edge(UDim2.new(1, 0, 0, 2), UDim2.new(0, 0, 0, 0), hi) -- top
+	edge(UDim2.new(0, 2, 1, 0), UDim2.new(0, 0, 0, 0), hi) -- left
+	edge(UDim2.new(1, 0, 0, 2), UDim2.new(0, 0, 1, -2), lo) -- bottom
+	edge(UDim2.new(0, 2, 1, 0), UDim2.new(1, -2, 0, 0), lo) -- right
 end
-local sparkSeq = makeSparkSeq(PRIMARY)
 
-local function addAnimatedStroke(frame: GuiObject, thickness: number?)
+-- Redstone dust border: dim when unpowered, glows/pulses red while the booster
+-- is enabled (the whole "circuit" powers on together). Frames added to
+-- redstoneLines get tinted the same way (used by the separator).
+local redstoneStrokes: { UIStroke } = {}
+local redstoneLines: { Frame } = {}
+
+local function addRedstoneStroke(frame: GuiObject, thickness: number?)
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(255, 255, 255)
-	stroke.Thickness = thickness or 1.5
+	stroke.Thickness = thickness or 2
+	stroke.Color = RED_DIM
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	stroke.Parent = frame
-
-	local grad = Instance.new("UIGradient")
-	grad.Color = sparkSeq
-	grad.Parent = stroke
-
-	table.insert(strokeRegistry, grad)
+	table.insert(redstoneStrokes, stroke)
 	return stroke
 end
 
 do
-	local angle = 0
+	local t = 0
 	RunService.Heartbeat:Connect(function(dt)
-		angle = (angle + 90 * dt) % 360
-		for i = #strokeRegistry, 1, -1 do
-			local grad = strokeRegistry[i]
-			if grad.Parent then
-				grad.Rotation = angle
-			else
-				table.remove(strokeRegistry, i)
-			end
+		t += dt
+		-- Only glow while powered (enabled); otherwise sit at the dim, unpowered red.
+		local glow = enabled and (0.5 + 0.5 * math.sin(t * 4)) or 0
+		local col = RED_DIM:Lerp(RED_BRIGHT, glow)
+		for i = #redstoneStrokes, 1, -1 do
+			local s = redstoneStrokes[i]
+			if s.Parent then s.Color = col else table.remove(redstoneStrokes, i) end
+		end
+		for i = #redstoneLines, 1, -1 do
+			local l = redstoneLines[i]
+			if l.Parent then l.BackgroundColor3 = col else table.remove(redstoneLines, i) end
 		end
 	end)
 end
+
+--==============================================================
+-- UI
+--==============================================================
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "SpeedBoosterPanel"
@@ -363,81 +369,88 @@ local panel = Instance.new("Frame")
 panel.Name = "Panel"
 panel.Size = UDim2.fromOffset(250, 226)
 panel.Position = UDim2.new(0, 24, 0.5, -113)
-panel.BackgroundColor3 = BG
-panel.BackgroundTransparency = 0.06
+panel.BackgroundColor3 = STONE_TOP
 panel.BorderSizePixel = 0
 panel.Active = true
 panel.Parent = gui
-
-local panelCorner = Instance.new("UICorner")
-panelCorner.CornerRadius = UDim.new(0, 14)
-panelCorner.Parent = panel
+-- sharp corners = blocky Minecraft slab (no UICorner)
 
 local panelGradient = Instance.new("UIGradient")
 panelGradient.Rotation = 90
-panelGradient.Color = ColorSequence.new(BG:Lerp(CARD, 0.6), Color3.fromRGB(8, 8, 10))
+panelGradient.Color = ColorSequence.new(STONE_TOP, STONE_BOT)
 panelGradient.Parent = panel
 
-addAnimatedStroke(panel, 2.5)
+addBevel(panel, BEVEL_HI, BEVEL_LO)  -- raised stone slab
+addRedstoneStroke(panel, 2.5)        -- powered redstone dust outline
 
 -- Header ------------------------------------------------------
 local header = Instance.new("Frame")
 header.Name = "Header"
 header.Size = UDim2.new(1, 0, 0, 40)
 header.BackgroundTransparency = 1
+header.ZIndex = 3
 header.Parent = panel
 
-local statusDot = Instance.new("Frame")
-statusDot.Name = "StatusDot"
-statusDot.Size = UDim2.fromOffset(8, 8)
-statusDot.Position = UDim2.new(0, 14, 0.5, -4)
-statusDot.BackgroundColor3 = Color3.fromRGB(120, 120, 120)
-statusDot.BorderSizePixel = 0
-statusDot.Parent = header
-Instance.new("UICorner", statusDot).CornerRadius = UDim.new(1, 0)
+-- redstone lamp (dark when unpowered, glows when the booster is on)
+local lampGlow = Instance.new("Frame")
+lampGlow.Name = "LampGlow"
+lampGlow.Size = UDim2.fromOffset(18, 18)
+lampGlow.Position = UDim2.new(0, 10, 0.5, -9)
+lampGlow.BackgroundColor3 = RED_BRIGHT
+lampGlow.BackgroundTransparency = 1
+lampGlow.BorderSizePixel = 0
+lampGlow.ZIndex = 3
+lampGlow.Parent = header
+Instance.new("UICorner", lampGlow).CornerRadius = UDim.new(1, 0)
+
+local lamp = Instance.new("Frame")
+lamp.Name = "Lamp"
+lamp.Size = UDim2.fromOffset(12, 12)
+lamp.Position = UDim2.new(0, 13, 0.5, -6)
+lamp.BackgroundColor3 = Color3.fromRGB(70, 25, 25)
+lamp.BorderSizePixel = 0
+lamp.ZIndex = 4
+lamp.Parent = header
+addBevel(lamp, Color3.fromRGB(120, 60, 60), Color3.fromRGB(30, 10, 10))
 
 local title = Instance.new("TextLabel")
 title.Name = "Title"
-title.Size = UDim2.new(1, -34, 1, 0)
-title.Position = UDim2.fromOffset(30, 0)
+title.Size = UDim2.new(1, -40, 1, 0)
+title.Position = UDim2.fromOffset(34, 0)
 title.BackgroundTransparency = 1
-title.Text = "Dely Booster Test 67"
-title.Font = Enum.Font.GothamBlack
-title.TextSize = 16
+title.Text = "DELY BOOSTER TEST 67"
+title.Font = FONT
+title.TextSize = 17
 title.TextColor3 = Color3.fromRGB(245, 245, 248)
 title.TextXAlignment = Enum.TextXAlignment.Left
+title.TextStrokeTransparency = 0.5
+title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+title.ZIndex = 4
 title.Parent = header
 
+-- redstone dust separator (powers on with the circuit)
 local sep = Instance.new("Frame")
 sep.Name = "Separator"
-sep.Size = UDim2.new(1, -18, 0, 2)
-sep.Position = UDim2.fromOffset(9, 42)
-sep.BackgroundColor3 = PRIMARY
+sep.Size = UDim2.new(1, -20, 0, 3)
+sep.Position = UDim2.fromOffset(10, 42)
+sep.BackgroundColor3 = RED_DIM
 sep.BorderSizePixel = 0
+sep.ZIndex = 3
 sep.Parent = panel
--- breathing separator, same idle animation the hub uses
-task.spawn(function()
-	while sep and sep.Parent do
-		local t1 = TweenService:Create(sep, TweenInfo.new(1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { BackgroundTransparency = 0.35 })
-		t1:Play(); t1.Completed:Wait()
-		local t2 = TweenService:Create(sep, TweenInfo.new(1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { BackgroundTransparency = 0 })
-		t2:Play(); t2.Completed:Wait()
-	end
-end)
+table.insert(redstoneLines, sep)
 
 -- Speed rows --------------------------------------------------
--- Builds a "<label> ..... [ box ]" card and returns the box + label so the
--- behaviour section can wire and highlight it.
+-- Builds a "<label> ..... [ slot ]" stone row and returns the box + label.
 local function makeSpeedRow(name: string, labelText: string, defaultValue: number, y: number)
 	local row = Instance.new("Frame")
 	row.Name = name .. "Row"
-	row.Size = UDim2.new(1, -18, 0, 34)
-	row.Position = UDim2.fromOffset(9, y)
-	row.BackgroundColor3 = CARD
+	row.Size = UDim2.new(1, -20, 0, 34)
+	row.Position = UDim2.fromOffset(10, y)
+	row.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 	row.BorderSizePixel = 0
+	row.ZIndex = 2
 	row.Parent = panel
-	Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
-	addAnimatedStroke(row, 1)
+	addBevel(row, BEVEL_HI, BEVEL_LO)
 
 	local label = Instance.new("TextLabel")
 	label.Name = "Label"
@@ -445,45 +458,44 @@ local function makeSpeedRow(name: string, labelText: string, defaultValue: numbe
 	label.Position = UDim2.fromOffset(10, 0)
 	label.BackgroundTransparency = 1
 	label.Text = labelText
-	label.Font = Enum.Font.GothamBold
-	label.TextSize = 13
+	label.Font = FONT
+	label.TextSize = 15
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.TextColor3 = TEXT
+	label.ZIndex = 3
 	label.Parent = row
 
+	-- inventory-slot style box: inset bevel (dark top-left, light bottom-right)
 	local box = Instance.new("TextBox")
 	box.Name = "Box"
 	box.AnchorPoint = Vector2.new(1, 0.5)
-	box.Size = UDim2.fromOffset(74, 24)
+	box.Size = UDim2.fromOffset(72, 24)
 	box.Position = UDim2.new(1, -8, 0.5, 0)
-	box.BackgroundColor3 = FIELD
+	box.BackgroundColor3 = SLOT
 	box.BorderSizePixel = 0
 	box.ClearTextOnFocus = false
 	box.Text = tostring(defaultValue)
 	box.PlaceholderText = "studs/s"
-	box.Font = Enum.Font.GothamBold
-	box.TextSize = 13
-	box.TextColor3 = PRIMARY_LIGHT
+	box.Font = FONT
+	box.TextSize = 16
+	box.TextColor3 = Color3.fromRGB(255, 90, 90)
+	box.ZIndex = 3
 	box.Parent = row
-	Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
+	addBevel(box, BEVEL_LO, BEVEL_HI) -- swapped = pressed-in slot
 
-	local boxStroke = Instance.new("UIStroke")
-	boxStroke.Color = PRIMARY_DARK
-	boxStroke.Thickness = 1
-	boxStroke.Parent = box
-
-	return box, boxStroke, label
+	return box, label, row
 end
 
-local normalBox, normalBoxStroke, normalLabel = makeSpeedRow("Normal", "Normal Speed", DEFAULT_NORMAL_SPEED, 52)
-local carryBox, carryBoxStroke, carryLabel = makeSpeedRow("Carry", "Carry Speed", DEFAULT_CARRY_SPEED, 90)
+local normalBox, normalLabel = makeSpeedRow("Normal", "NORMAL SPEED", DEFAULT_NORMAL_SPEED, 52)
+local carryBox, carryLabel = makeSpeedRow("Carry", "CARRY SPEED", DEFAULT_CARRY_SPEED, 90)
 
 -- Presets (set the Normal speed) ------------------------------
 local presetRow = Instance.new("Frame")
 presetRow.Name = "Presets"
-presetRow.Size = UDim2.new(1, -18, 0, 26)
-presetRow.Position = UDim2.fromOffset(9, 130)
+presetRow.Size = UDim2.new(1, -20, 0, 26)
+presetRow.Position = UDim2.fromOffset(10, 130)
 presetRow.BackgroundTransparency = 1
+presetRow.ZIndex = 2
 presetRow.Parent = panel
 
 local presetLayout = Instance.new("UIListLayout")
@@ -491,66 +503,88 @@ presetLayout.FillDirection = Enum.FillDirection.Horizontal
 presetLayout.Padding = UDim.new(0, 6)
 presetLayout.Parent = presetRow
 
--- Enable pill -------------------------------------------------
+-- Toggle row with a redstone lever -----------------------------
 local toggleRow = Instance.new("Frame")
 toggleRow.Name = "ToggleRow"
-toggleRow.Size = UDim2.new(1, -18, 0, 36)
-toggleRow.Position = UDim2.fromOffset(9, 162)
-toggleRow.BackgroundColor3 = CARD
+toggleRow.Size = UDim2.new(1, -20, 0, 36)
+toggleRow.Position = UDim2.fromOffset(10, 162)
+toggleRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 toggleRow.BorderSizePixel = 0
+toggleRow.ZIndex = 2
 toggleRow.Parent = panel
-Instance.new("UICorner", toggleRow).CornerRadius = UDim.new(0, 6)
-addAnimatedStroke(toggleRow, 1)
+addBevel(toggleRow, BEVEL_HI, BEVEL_LO)
 
 local toggleLabel = Instance.new("TextLabel")
 toggleLabel.Name = "ToggleLabel"
 toggleLabel.Size = UDim2.new(0.5, 0, 1, 0)
 toggleLabel.Position = UDim2.fromOffset(10, 0)
 toggleLabel.BackgroundTransparency = 1
-toggleLabel.Text = "Enable"
-toggleLabel.Font = Enum.Font.GothamBold
-toggleLabel.TextSize = 13
+toggleLabel.Text = "ENABLE"
+toggleLabel.Font = FONT
+toggleLabel.TextSize = 15
 toggleLabel.TextXAlignment = Enum.TextXAlignment.Left
 toggleLabel.TextColor3 = TEXT
+toggleLabel.ZIndex = 3
 toggleLabel.Parent = toggleRow
 
-local pill = Instance.new("Frame")
-pill.Name = "Pill"
-pill.AnchorPoint = Vector2.new(1, 0.5)
-pill.Size = UDim2.fromOffset(46, 24)
-pill.Position = UDim2.new(1, -10, 0.5, 0)
-pill.BackgroundColor3 = Color3.fromRGB(30, 30, 36)
-pill.BorderSizePixel = 0
-pill.Parent = toggleRow
-Instance.new("UICorner", pill).CornerRadius = UDim.new(1, 0)
+-- lever cobble base
+local leverBase = Instance.new("Frame")
+leverBase.Name = "LeverBase"
+leverBase.AnchorPoint = Vector2.new(1, 0.5)
+leverBase.Size = UDim2.fromOffset(34, 12)
+leverBase.Position = UDim2.new(1, -12, 0.5, 6)
+leverBase.BackgroundColor3 = Color3.fromRGB(64, 64, 70)
+leverBase.BorderSizePixel = 0
+leverBase.ZIndex = 3
+leverBase.Parent = toggleRow
+addBevel(leverBase, Color3.fromRGB(96, 96, 104), Color3.fromRGB(28, 28, 32))
 
-local dot = Instance.new("Frame")
-dot.Name = "Dot"
-dot.Size = UDim2.fromOffset(18, 18)
-dot.Position = UDim2.new(0, 3, 0.5, -9)
-dot.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-dot.BorderSizePixel = 0
-dot.Parent = pill
-Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+-- lever handle (pivots at the base) — starts in the OFF position
+local handle = Instance.new("Frame")
+handle.Name = "Handle"
+handle.AnchorPoint = Vector2.new(0.5, 1)
+handle.Size = UDim2.fromOffset(7, 22)
+handle.Position = UDim2.new(0.5, 0, 0, 1)
+handle.Rotation = 38
+handle.BackgroundColor3 = Color3.fromRGB(120, 120, 128)
+handle.BorderSizePixel = 0
+handle.ZIndex = 4
+handle.Parent = leverBase
+addBevel(handle, Color3.fromRGB(150, 150, 158), Color3.fromRGB(60, 60, 66))
 
-local pillButton = Instance.new("TextButton")
-pillButton.Size = UDim2.fromScale(1, 1)
-pillButton.BackgroundTransparency = 1
-pillButton.Text = ""
-pillButton.AutoButtonColor = false
-pillButton.Parent = pill
+-- knob at the top of the handle — the redstone tip that lights up when ON
+local knob = Instance.new("Frame")
+knob.Name = "Knob"
+knob.AnchorPoint = Vector2.new(0.5, 0)
+knob.Size = UDim2.fromOffset(12, 12)
+knob.Position = UDim2.new(0.5, 0, 0, -4)
+knob.BackgroundColor3 = Color3.fromRGB(70, 22, 22)
+knob.BorderSizePixel = 0
+knob.ZIndex = 5
+knob.Parent = handle
+addBevel(knob, Color3.fromRGB(150, 60, 60), Color3.fromRGB(40, 12, 12))
+
+-- whole row is clickable
+local leverButton = Instance.new("TextButton")
+leverButton.Size = UDim2.fromScale(1, 1)
+leverButton.BackgroundTransparency = 1
+leverButton.Text = ""
+leverButton.AutoButtonColor = false
+leverButton.ZIndex = 6
+leverButton.Parent = toggleRow
 
 -- Mode readout / hint -----------------------------------------
 local hint = Instance.new("TextLabel")
 hint.Name = "Hint"
-hint.Size = UDim2.new(1, -18, 0, 16)
-hint.Position = UDim2.fromOffset(9, 200)
+hint.Size = UDim2.new(1, -20, 0, 16)
+hint.Position = UDim2.fromOffset(10, 202)
 hint.BackgroundTransparency = 1
-hint.Text = "RightShift to toggle"
-hint.Font = Enum.Font.GothamBold
-hint.TextSize = 11
+hint.Text = "RIGHTSHIFT TO TOGGLE"
+hint.Font = FONT
+hint.TextSize = 13
 hint.TextColor3 = SUBTEXT
 hint.TextXAlignment = Enum.TextXAlignment.Center
+hint.ZIndex = 3
 hint.Parent = panel
 
 -- Dragging (custom, since Frame.Draggable is deprecated) ------
@@ -594,16 +628,19 @@ local function setCarrySpeed(value: number)
 	carryBox.Text = tostring(carrySpeed)
 end
 
-local function animPill(on: boolean)
-	TweenService:Create(pill, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {
-		BackgroundColor3 = on and PRIMARY_DARK or Color3.fromRGB(30, 30, 36),
+-- Flip the lever + light the lamp/knob when powered.
+local function animLever(on: boolean)
+	TweenService:Create(handle, TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Rotation = on and -38 or 38,
 	}):Play()
-	TweenService:Create(dot, TweenInfo.new(0.18, Enum.EasingStyle.Back), {
-		Position = on and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
-		BackgroundColor3 = on and PRIMARY or Color3.fromRGB(100, 100, 100),
+	TweenService:Create(knob, TweenInfo.new(0.16), {
+		BackgroundColor3 = on and RED_BRIGHT or Color3.fromRGB(70, 22, 22),
 	}):Play()
-	TweenService:Create(statusDot, TweenInfo.new(0.18), {
-		BackgroundColor3 = on and Color3.fromRGB(0, 255, 90) or Color3.fromRGB(120, 120, 120),
+	TweenService:Create(lamp, TweenInfo.new(0.18), {
+		BackgroundColor3 = on and RED_BRIGHT or Color3.fromRGB(70, 25, 25),
+	}):Play()
+	TweenService:Create(lampGlow, TweenInfo.new(0.18), {
+		BackgroundTransparency = on and 0.55 or 1,
 	}):Play()
 end
 
@@ -612,24 +649,24 @@ end
 local function updateMode()
 	local normalActive = enabled and not carrying
 	local carryActive = enabled and carrying
-	normalLabel.TextColor3 = normalActive and PRIMARY_LIGHT or TEXT
-	carryLabel.TextColor3 = carryActive and PRIMARY_LIGHT or TEXT
+	normalLabel.TextColor3 = normalActive and RED_BRIGHT or TEXT
+	carryLabel.TextColor3 = carryActive and RED_BRIGHT or TEXT
 
 	if not enabled then
-		hint.Text = "RightShift to toggle"
+		hint.Text = "RIGHTSHIFT TO TOGGLE"
 		hint.TextColor3 = SUBTEXT
 	elseif carrying then
-		hint.Text = string.format("Carrying brainrot  •  %d", carrySpeed)
-		hint.TextColor3 = PRIMARY_LIGHT
+		hint.Text = string.format("CARRYING  -  %d", carrySpeed)
+		hint.TextColor3 = RED_BRIGHT
 	else
-		hint.Text = string.format("Normal  •  %d", normalSpeed)
+		hint.Text = string.format("NORMAL  -  %d", normalSpeed)
 		hint.TextColor3 = Color3.fromRGB(120, 255, 165)
 	end
 end
 
 local function setEnabled(value: boolean)
 	enabled = value
-	animPill(enabled)
+	animLever(enabled)
 
 	if not enabled then
 		if linearVelocity then
@@ -643,13 +680,9 @@ local function setEnabled(value: boolean)
 	updateMode()
 end
 
--- Focus glow + validated commit, shared by both speed boxes.
-local function wireBox(box: TextBox, stroke: UIStroke, setter: (number) -> (), getter: () -> number)
-	box.Focused:Connect(function()
-		TweenService:Create(stroke, TweenInfo.new(0.12), { Color = PRIMARY }):Play()
-	end)
+-- Validated commit, shared by both speed boxes.
+local function wireBox(box: TextBox, setter: (number) -> (), getter: () -> number)
 	box.FocusLost:Connect(function()
-		TweenService:Create(stroke, TweenInfo.new(0.12), { Color = PRIMARY_DARK }):Play()
 		local value = tonumber(box.Text)
 		if value then
 			setter(value)
@@ -659,37 +692,29 @@ local function wireBox(box: TextBox, stroke: UIStroke, setter: (number) -> (), g
 		updateMode()
 	end)
 end
-wireBox(normalBox, normalBoxStroke, setNormalSpeed, getNormalSpeed)
-wireBox(carryBox, carryBoxStroke, setCarrySpeed, getCarrySpeed)
+wireBox(normalBox, setNormalSpeed, getNormalSpeed)
+wireBox(carryBox, setCarrySpeed, getCarrySpeed)
 
 for _, preset in PRESETS do
 	local button = Instance.new("TextButton")
 	button.Name = "Preset" .. preset
 	button.Size = UDim2.new(0, 38, 1, 0)
-	button.BackgroundColor3 = FIELD
+	button.BackgroundColor3 = Color3.fromRGB(70, 70, 76) -- cobblestone
 	button.BorderSizePixel = 0
 	button.AutoButtonColor = false
 	button.Text = tostring(preset)
-	button.Font = Enum.Font.GothamBold
-	button.TextSize = 12
-	button.TextColor3 = Color3.fromRGB(200, 200, 210)
+	button.Font = FONT
+	button.TextSize = 14
+	button.TextColor3 = Color3.fromRGB(225, 225, 230)
+	button.ZIndex = 3
 	button.Parent = presetRow
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 5)
-	corner.Parent = button
-
-	local btnStroke = Instance.new("UIStroke")
-	btnStroke.Color = PRIMARY_DARK
-	btnStroke.Thickness = 1
-	btnStroke.Transparency = 0.4
-	btnStroke.Parent = button
+	addBevel(button, Color3.fromRGB(104, 104, 112), Color3.fromRGB(34, 34, 38))
 
 	button.MouseEnter:Connect(function()
-		TweenService:Create(button, TweenInfo.new(0.1), { BackgroundColor3 = PRIMARY_DARK }):Play()
+		TweenService:Create(button, TweenInfo.new(0.1), { BackgroundColor3 = RED_DIM }):Play()
 	end)
 	button.MouseLeave:Connect(function()
-		TweenService:Create(button, TweenInfo.new(0.1), { BackgroundColor3 = FIELD }):Play()
+		TweenService:Create(button, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(70, 70, 76) }):Play()
 	end)
 	button.Activated:Connect(function()
 		setNormalSpeed(preset) -- presets set the Normal speed
@@ -697,7 +722,7 @@ for _, preset in PRESETS do
 	end)
 end
 
-pillButton.Activated:Connect(function()
+leverButton.Activated:Connect(function()
 	setEnabled(not enabled)
 end)
 

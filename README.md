@@ -1,6 +1,8 @@
 # Dely Booster Test 67
 
-A LocalScript speed booster for Roblox with a small on-screen panel.
+A LocalScript speed booster for Roblox with a Minecraft **redstone**-themed
+panel — a deepslate slab with pixel bevels, a lever toggle, and a redstone-dust
+border that powers on (glows red) only while the booster is enabled.
 
 ## Install
 
@@ -12,10 +14,16 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
 - **Normal Speed box** — speed used when you're not carrying anything.
 - **Carry Speed box** — speed used while carrying a brainrot.
 - Both clamped to 0–1000; type a number and press Enter.
-- **Presets** — 16 / 32 / 60 / 100 / 200 (set the Normal speed).
-- **Enable pill** — toggles the boost. `RightShift` does the same.
+- **Presets** — 16 / 32 / 60 / 100 / 200 cobblestone buttons (set the Normal speed).
+- **Lever** — flip it to toggle the boost; the lamp, knob and border light up
+  red ("powered"). `RightShift` toggles it too.
 - The readout at the bottom shows the live mode (`Normal` / `Carrying`).
 - The panel is draggable.
+
+The blocky look uses `Enum.Font.Arcade` (the closest built-in to Minecraftia)
+and 2px pixel bevels — light top/left, dark bottom/right — on the slab and
+buttons, inset (pressed-in) on the speed slots. Swap in a real Minecraftia
+font asset later if you want it pixel-perfect.
 
 ## Normal vs Carry speed
 
