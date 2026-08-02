@@ -113,6 +113,7 @@ local prevSpeed = 0
 local speedAnimActive = false
 local lastSpeedFlash = 0
 local counterScanT = 0
+local lastShownSpeed = -1 -- only rewrite the number when it changes
 local COUNTER_BASE_Y = 2.6 -- studs above the head when nothing else is up there
 local BB_NORMAL = UDim2.fromOffset(150, 40)
 local BB_MID = UDim2.fromOffset(162, 44)
@@ -392,7 +393,11 @@ local function updateCounter()
 	billboard.Enabled = true
 
 	local current = measureHorizontalSpeed()
-	label.Text = tostring(math.round(current))
+	local rounded = math.round(current)
+	if rounded ~= lastShownSpeed then
+		label.Text = tostring(rounded)
+		lastShownSpeed = rounded
+	end
 
 	-- del-hub flash on acceleration
 	local delta = current - prevSpeed
@@ -516,9 +521,30 @@ local borderSpin = 0 -- extra rotation velocity injected on activate; decays to 
 
 do
 	local t = 0
+	local idleApplied = false -- when off + not animating, we stop writing every frame (FPS)
 	RunService.Heartbeat:Connect(function(dt)
+		-- Fully idle (booster off, no surge/spin-down running): apply the off-state
+		-- once, then do nothing each frame until something changes.
+		if not enabled and powerSurge <= 0.001 and math.abs(borderSpin) <= 0.5 then
+			if not idleApplied then
+				idleApplied = true
+				powerSurge, borderSpin = 0, 0
+				local col = RED_DIM
+				for _, l in ipairs(redstoneLines) do if l.Parent then l.BackgroundColor3 = col end end
+				for _, img in ipairs(redstoneImages) do if img.Parent then img.ImageColor3 = col end end
+				if panelBorder and panelBorderGrad then
+					panelBorderGrad.Enabled = false
+					panelBorder.Color = REDDISH_BLACK
+					panelBorder.Thickness = PANEL_BORDER_BASE
+				end
+			end
+			return
+		end
+		idleApplied = false
+
 		t += dt
 		powerSurge = math.max(0, powerSurge - dt * 2.5) -- decays after a switch-on
+		borderSpin = borderSpin - borderSpin * math.min(dt * 3.5, 1) -- decays to 0
 		-- Only glow while powered (enabled); otherwise sit at the dim, unpowered red.
 		-- The surge briefly overrides the sine so a flick flashes bright.
 		local glow = enabled and math.max(0.5 + 0.5 * math.sin(t * 4), powerSurge) or 0
@@ -534,13 +560,10 @@ do
 
 		-- panel border: powered = flowing gradient surge; off = still reddish-black
 		if panelBorder and panelBorderGrad then
-			borderSpin = borderSpin - borderSpin * math.min(dt * 3.5, 1) -- decays to 0
 			if enabled then
 				panelBorderGrad.Enabled = true
 				panelBorder.Color = Color3.fromRGB(255, 255, 255) -- let the gradient show
-				-- steady flow (~100/s) plus the decaying activate spin-up
 				panelBorderGrad.Rotation = (panelBorderGrad.Rotation + (100 + borderSpin) * dt) % 360
-				-- spin-up also spikes the thickness so it "charges up" as it appears
 				panelBorder.Thickness = PANEL_BORDER_BASE + math.sin(t * 6) * 0.8 + powerSurge * 2 + borderSpin * 0.004
 			else
 				panelBorderGrad.Enabled = false
@@ -561,10 +584,23 @@ gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
+-- Device sizing: bigger + tappable on mobile, normal on PC, clamped to fit the
+-- viewport on small screens. Applied through panelScale (the panel's UIScale).
+local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+local PANEL_W, PANEL_H = 250, 200
+local function computeScale(): number
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+	local target = IS_MOBILE and 1.3 or 1.0
+	return math.clamp(math.min(target, (vp.X - 20) / PANEL_W, (vp.Y - 20) / PANEL_H), 0.55, 1.4)
+end
+local deviceScale = computeScale()
+
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
-panel.Size = UDim2.fromOffset(250, 200)
-panel.Position = UDim2.new(0, 24, 0.5, -100)
+panel.Size = UDim2.fromOffset(PANEL_W, PANEL_H)
+panel.AnchorPoint = Vector2.new(0, 0.5) -- scales/sits from left-center, stays on screen
+panel.Position = UDim2.new(0, 24, 0.5, 0)
 panel.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
 panel.BorderSizePixel = 0
 panel.Active = true
@@ -591,7 +627,27 @@ panelBorderGrad.Enabled = false
 panelBorderGrad.Parent = panelBorder
 
 local panelScale = Instance.new("UIScale")
+panelScale.Scale = deviceScale -- resting scale = device scale
 panelScale.Parent = panel
+
+-- Panel scale pop that springs back to the device scale (not 1).
+local function panelPop(from: number)
+	panelScale.Scale = deviceScale * from
+	TweenService:Create(panelScale, TweenInfo.new(0.24, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Scale = deviceScale,
+	}):Play()
+end
+
+-- Re-fit if the screen/viewport changes (rotation, window resize).
+do
+	local cam = workspace.CurrentCamera
+	if cam then
+		cam:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+			deviceScale = computeScale()
+			panelScale.Scale = deviceScale
+		end)
+	end
+end
 
 -- Title row (in the dark body): dust indicator + title
 local dust = Instance.new("ImageLabel")
@@ -941,7 +997,7 @@ local function setEnabled(value: boolean)
 
 	if enabled then
 		powerSurge = 1          -- flash the whole circuit bright
-		punch(panelScale, 1.03) -- little power "thunk"
+		panelPop(1.03)          -- little power "thunk" (respects device scale)
 		borderSpin = 1000       -- gradient whirls in fast, then eases to the steady flow
 		if panelBorder then     -- and fades in as it charges up
 			panelBorder.Transparency = 1
@@ -1042,7 +1098,7 @@ end
 suppressSave = false
 
 -- intro: grow the panel in, then shake the redstone dust + lever as it powers up
-punch(panelScale, 0.8)
+panelPop(0.8)
 task.delay(0.12, function()
 	shake(dust, 16, 0.6)
 	shake(leverImage, 12, 0.6)

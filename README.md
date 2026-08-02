@@ -22,6 +22,21 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
 - The active speed row's label lights red so you can see the live mode.
 - The panel is draggable, and its position is remembered.
 
+## Mobile + PC
+
+Works with both touch and mouse (toggles use `Activated`, dragging handles
+`Touch`). The panel auto-sizes: ~30% bigger and more tappable on phones
+(`IS_MOBILE`), normal on PC, and clamped down to fit small screens — driven by a
+single `panelScale` `UIScale` that also re-fits on rotation / window resize.
+
+## Performance
+
+The cosmetic loops are light and idle-aware: when the boost is off and nothing
+is animating, the border/dust loop applies its off-state once and then does
+nothing each frame. The head-counter number is only rewritten when it changes,
+and the "float above other head text" scan runs a few times a second, not every
+frame.
+
 ## Auto-save
 
 Settings persist across rejoins automatically (executor filesystem — needs
