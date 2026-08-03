@@ -1820,24 +1820,28 @@ local function setPanelVisible(v: boolean)
 		return
 	end
 	panelVisible = v
-	punch(toggleScale, 0.8)
+	punch(toggleScale, 0.85)
 	if v then
 		panel.Visible = true
-		panelScale.Scale = deviceScale * 0.6
-		TweenService:Create(panelScale, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = deviceScale }):Play()
+		panelPop(0.7)
 	else
-		local tw = TweenService:Create(panelScale, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = deviceScale * 0.5 })
-		tw:Play()
-		tw.Completed:Connect(function()
-			if not panelVisible then
-				panel.Visible = false
-			end
-		end)
+		panel.Visible = false
 	end
 end
 
 do
 	local dragging, moved, dragStart, startPos = false, false, nil, nil
+	local lastToggle = 0
+	local function toggleMenu()
+		if moved then
+			return
+		end
+		if tick() - lastToggle < 0.25 then
+			return
+		end
+		lastToggle = tick()
+		setPanelVisible(not panelVisible)
+	end
 	toggleBtn.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
@@ -1851,7 +1855,7 @@ do
 		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
 			or input.UserInputType == Enum.UserInputType.Touch) then
 			local delta = input.Position - dragStart
-			if delta.Magnitude > 6 then
+			if delta.Magnitude > 8 then
 				moved = true
 			end
 			toggleBtn.Position = UDim2.new(
@@ -1865,10 +1869,11 @@ do
 			dragging = false
 		end
 	end)
-	toggleBtn.Activated:Connect(function()
-		if not moved then
-			setPanelVisible(not panelVisible)
-		end
+	toggleBtn.Activated:Connect(toggleMenu)
+	toggleBtn.MouseButton1Click:Connect(toggleMenu)
+	toggleBtn.TouchTap:Connect(function()
+		moved = false
+		toggleMenu()
 	end)
 end
 end
