@@ -25,6 +25,12 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
   another base within reach, grabs the prompt's own hold/trigger connections
   (`getconnections`) and fires them, so the steal goes through the game's normal
   path. Executor-only.
+- **Inf Jump** - jump again any time you press jump, even mid-air. It uses the
+  same `LinearVelocity` idea as the boost: a Line-mode constraint pinned to the
+  world Y axis that pulses an upward `LineVelocity` for a split second on each
+  `JumpRequest`, instead of `Humanoid:ChangeState` or writing
+  `AssemblyLinearVelocity`, so it doesn't trip the same detection. Works on
+  keyboard (Space) and the mobile jump button.
 - **Anti Die** - keeps your own character alive: tops your `Humanoid.Health` back
   to `MaxHealth` each frame, disables the `Dead` humanoid state and leaves your
   joints intact (`BreakJointsOnDeath = false`) while it's on. Reapplies itself on
@@ -61,7 +67,7 @@ Settings persist across rejoins automatically (executor filesystem - needs
 `writefile`/`readfile`/`isfile`; silently no-ops without them). Whenever you
 change a value it writes `dely_booster_test67.json`, and on load it applies the
 saved **normal speed, carry speed, boost on/off, speed-counter on/off, anti-die
-on/off, and panel position**. No save button - it just remembers.
+on/off, inf-jump on/off, and panel position**. No save button - it just remembers.
 
 The look uses `Enum.Font.Arcade` (the closest built-in to Minecraftia) with
 rounded corners (`UICorner`) throughout and soft edge strokes - light rims on

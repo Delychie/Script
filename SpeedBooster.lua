@@ -71,6 +71,7 @@ local normalSpeed = DEFAULT_NORMAL_SPEED
 local carrySpeed = DEFAULT_CARRY_SPEED
 local carrying = false
 local antiDie = false
+local infJump = false
 
 local character: Model? = nil
 local humanoid: Humanoid? = nil
@@ -79,6 +80,7 @@ local head: BasePart? = nil
 
 local attachment: Attachment? = nil
 local linearVelocity: LinearVelocity? = nil
+local jumpVelocity: LinearVelocity? = nil
 
 local counterGui: BillboardGui? = nil
 local counterLabel: TextLabel? = nil
@@ -110,6 +112,7 @@ local function saveConfig()
 		enabled = enabled,
 		counterEnabled = counterEnabled,
 		antiDie = antiDie,
+		infJump = infJump,
 		guiPos = savedGuiPos,
 	}
 	pcall(function()
@@ -134,6 +137,10 @@ local function teardownMover()
 	if linearVelocity then
 		linearVelocity:Destroy()
 		linearVelocity = nil
+	end
+	if jumpVelocity then
+		jumpVelocity:Destroy()
+		jumpVelocity = nil
 	end
 	if attachment then
 		attachment:Destroy()
@@ -165,8 +172,20 @@ local function buildMover()
 	newVelocity.Enabled = false
 	newVelocity.Parent = rootPart
 
+	local newJump = Instance.new("LinearVelocity")
+	newJump.Name = "SpeedBoosterJump"
+	newJump.Attachment0 = newAttachment
+	newJump.RelativeTo = Enum.ActuatorRelativeTo.World
+	newJump.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
+	newJump.LineDirection = Vector3.new(0, 1, 0)
+	newJump.MaxForce = math.huge
+	newJump.LineVelocity = 0
+	newJump.Enabled = false
+	newJump.Parent = rootPart
+
 	attachment = newAttachment
 	linearVelocity = newVelocity
+	jumpVelocity = newJump
 end
 
 local function teardownCounter()
@@ -727,6 +746,44 @@ local function setAntiDie(on: boolean)
 	saveConfig()
 end
 
+local JUMP_VELOCITY = 50
+local JUMP_HOLD = 0.12
+local setInfJumpVisual: ((boolean) -> ())? = nil
+
+local function doInfJump()
+	local jv = jumpVelocity
+	local hum = humanoid
+	if not jv or not jv.Parent or not hum or hum.Health <= 0 then
+		return
+	end
+	jv.LineVelocity = JUMP_VELOCITY
+	jv.Enabled = true
+	task.delay(JUMP_HOLD, function()
+		if jumpVelocity == jv and jv.Parent then
+			jv.Enabled = false
+			jv.LineVelocity = 0
+		end
+	end)
+end
+
+UserInputService.JumpRequest:Connect(function()
+	if infJump then
+		doInfJump()
+	end
+end)
+
+local function setInfJump(on: boolean)
+	infJump = on
+	if not on and jumpVelocity then
+		jumpVelocity.Enabled = false
+		jumpVelocity.LineVelocity = 0
+	end
+	if setInfJumpVisual then
+		setInfJumpVisual(on)
+	end
+	saveConfig()
+end
+
 local function round(inst: GuiObject, radius: number)
 	local c = Instance.new("UICorner")
 	c.CornerRadius = UDim.new(0, radius)
@@ -834,7 +891,7 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
 local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
-local PANEL_W, PANEL_H = 250, 360
+local PANEL_W, PANEL_H = 250, 398
 local function computeScale(): number
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
@@ -1081,7 +1138,7 @@ leverButton.Parent = toggleRow
 local counterRow = Instance.new("Frame")
 counterRow.Name = "CounterRow"
 counterRow.Size = UDim2.new(1, -20, 0, 32)
-counterRow.Position = UDim2.fromOffset(10, 282)
+counterRow.Position = UDim2.fromOffset(10, 320)
 counterRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 counterRow.BorderSizePixel = 0
 counterRow.ZIndex = 2
@@ -1288,6 +1345,10 @@ setAntiDieVisual = makeSwitchRow("AntiDie", "ANTI DIE", 244, function()
 	setAntiDie(not antiDie)
 end)
 
+setInfJumpVisual = makeSwitchRow("InfJump", "INF JUMP", 282, function()
+	setInfJump(not infJump)
+end)
+
 local function makeButtonRow(name: string, labelText: string, btnText: string, y: number, onClick: () -> ())
 	local row = Instance.new("Frame")
 	row.Name = name .. "Row"
@@ -1341,7 +1402,7 @@ local function makeButtonRow(name: string, labelText: string, btnText: string, y
 	end)
 end
 
-makeButtonRow("InstantReset", "INSTANT RESET", "RESET", 320, instantReset)
+makeButtonRow("InstantReset", "INSTANT RESET", "RESET", 358, instantReset)
 
 do
 	local dragging, dragStart, startPos = false, nil, nil
@@ -1500,6 +1561,7 @@ setCarrySpeed(DEFAULT_CARRY_SPEED)
 setEnabled(false)
 setCounterEnabled(false)
 setAntiDie(false)
+setInfJump(false)
 
 local savedCfg = loadConfig()
 if savedCfg then
@@ -1507,6 +1569,7 @@ if savedCfg then
 	if type(savedCfg.carrySpeed) == "number" then setCarrySpeed(savedCfg.carrySpeed) end
 	if savedCfg.counterEnabled ~= nil then setCounterEnabled(savedCfg.counterEnabled == true) end
 	if savedCfg.antiDie ~= nil then setAntiDie(savedCfg.antiDie == true) end
+	if savedCfg.infJump ~= nil then setInfJump(savedCfg.infJump == true) end
 	if savedCfg.enabled ~= nil then setEnabled(savedCfg.enabled == true) end
 	if type(savedCfg.guiPos) == "table" and #savedCfg.guiPos >= 4 then
 		savedGuiPos = savedCfg.guiPos
