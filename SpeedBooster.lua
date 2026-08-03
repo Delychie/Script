@@ -9,6 +9,25 @@ local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+local clickSound = Instance.new("Sound")
+clickSound.SoundId = "rbxassetid://88073348503000"
+clickSound.Volume = 1
+clickSound.Parent = game:GetService("SoundService")
+task.spawn(function()
+	pcall(function() game:GetService("ContentProvider"):PreloadAsync({ clickSound }) end)
+end)
+local function playClick()
+	clickSound.TimePosition = 0
+	clickSound:Play()
+end
+local function hookClick(btn: TextButton)
+	btn.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			playClick()
+		end
+	end)
+end
+
 local DEFAULT_NORMAL_SPEED = 60
 local DEFAULT_CARRY_SPEED = 27
 local MIN_SPEED = 0
@@ -773,11 +792,11 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
 local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
-local PANEL_W, PANEL_H = 250, 352
+local PANEL_W, PANEL_H = 250, 322
 local function computeScale(): number
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
-	local target = IS_MOBILE and 1.3 or 1.0
+	local target = IS_MOBILE and 1.05 or 1.0
 	return math.clamp(math.min(target, (vp.X - 20) / PANEL_W, (vp.Y - 20) / PANEL_H), 0.55, 1.4)
 end
 local deviceScale = computeScale()
@@ -1020,7 +1039,7 @@ leverButton.Parent = toggleRow
 local counterRow = Instance.new("Frame")
 counterRow.Name = "CounterRow"
 counterRow.Size = UDim2.new(1, -20, 0, 32)
-counterRow.Position = UDim2.fromOffset(10, 274)
+counterRow.Position = UDim2.fromOffset(10, 244)
 counterRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 counterRow.BorderSizePixel = 0
 counterRow.ZIndex = 2
@@ -1147,15 +1166,77 @@ local function makeSwitchRow(name: string, labelText: string, y: number, onClick
 	end
 end
 
-setAutoLeftVisual = makeSwitchRow("AutoLeft", "AUTO LEFT", 160, function()
-	setAutoLeft(not autoLeftEnabled)
-end)
-setAutoRightVisual = makeSwitchRow("AutoRight", "AUTO RIGHT", 198, function()
-	setAutoRight(not autoRightEnabled)
-end)
+local function makeAutoRow(y: number)
+	local row = Instance.new("Frame")
+	row.Name = "AutoRow"
+	row.Size = UDim2.new(1, -20, 0, 40)
+	row.Position = UDim2.fromOffset(10, y)
+	row.BackgroundTransparency = 1
+	row.ZIndex = 2
+	row.Parent = panel
+
+	local function makeBtn(text: string, xScale: number)
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0.5, -3, 1, 0)
+		btn.Position = UDim2.new(xScale, xScale == 0 and 0 or 3, 0, 0)
+		btn.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
+		btn.Text = text
+		btn.Font = FONT
+		btn.TextSize = 16
+		btn.TextColor3 = TEXT
+		btn.AutoButtonColor = false
+		btn.ZIndex = 3
+		btn.Parent = row
+		round(btn, 6)
+		edgeStroke(btn, Color3.fromRGB(62, 62, 70), 1, 0.25)
+		local sc = Instance.new("UIScale")
+		sc.Parent = btn
+		return btn, sc
+	end
+
+	local leftBtn, leftScale = makeBtn("AUTO LEFT", 0)
+	local rightBtn, rightScale = makeBtn("AUTO RIGHT", 0.5)
+
+	local function hover(btn: TextButton, isOn: () -> boolean)
+		btn.MouseEnter:Connect(function()
+			if not isOn() then
+				TweenService:Create(btn, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(46, 46, 52) }):Play()
+			end
+		end)
+		btn.MouseLeave:Connect(function()
+			if not isOn() then
+				TweenService:Create(btn, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(34, 34, 38) }):Play()
+			end
+		end)
+	end
+	hover(leftBtn, function() return autoLeftEnabled end)
+	hover(rightBtn, function() return autoRightEnabled end)
+
+	leftBtn.Activated:Connect(function()
+		punch(leftScale, 0.9)
+		setAutoLeft(not autoLeftEnabled)
+	end)
+	rightBtn.Activated:Connect(function()
+		punch(rightScale, 0.9)
+		setAutoRight(not autoRightEnabled)
+	end)
+
+	local function styler(btn: TextButton)
+		return function(on: boolean)
+			TweenService:Create(btn, TweenInfo.new(0.14), {
+				BackgroundColor3 = on and CRIMSON or Color3.fromRGB(34, 34, 38),
+			}):Play()
+			btn.TextColor3 = on and Color3.fromRGB(255, 235, 235) or TEXT
+		end
+	end
+
+	return styler(leftBtn), styler(rightBtn)
+end
+
+setAutoLeftVisual, setAutoRightVisual = makeAutoRow(160)
 
 local setAutoGrabVisual
-setAutoGrabVisual = makeSwitchRow("AutoGrab", "AUTO GRAB", 236, function()
+setAutoGrabVisual = makeSwitchRow("AutoGrab", "AUTO GRAB", 206, function()
 	grab.enabled = not grab.enabled
 	if grab.enabled then startAutoGrab() else stopAutoGrab() end
 	setAutoGrabVisual(grab.enabled)
@@ -1214,7 +1295,7 @@ local function makeButtonRow(name: string, labelText: string, btnText: string, y
 	end)
 end
 
-makeButtonRow("InstantReset", "INSTANT RESET", "RESET", 312, instantReset)
+makeButtonRow("InstantReset", "INSTANT RESET", "RESET", 282, instantReset)
 
 do
 	local dragging, dragStart, startPos = false, nil, nil
@@ -1390,6 +1471,17 @@ panelPop(0.8)
 task.delay(0.12, function()
 	shake(dust, 16, 0.6)
 	shake(leverImage, 12, 0.6)
+end)
+
+for _, d in ipairs(gui:GetDescendants()) do
+	if d:IsA("TextButton") then
+		hookClick(d)
+	end
+end
+gui.DescendantAdded:Connect(function(d)
+	if d:IsA("TextButton") then
+		hookClick(d)
+	end
 end)
 
 if player.Character then

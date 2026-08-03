@@ -16,11 +16,11 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
 - Both clamped to 0–1000; type a number and press Enter.
 - **Lever** - flip it to toggle the boost; the lamp, knob and border light up
   red ("powered").
-- **Auto Left / Auto Right** - walk the two fixed base waypoints (`AP_L1/AP_L2`,
-  `AP_R1/AP_R2`) and flip off when the route finishes. They drive the same
-  `LinearVelocity` plane mover as the boost instead of writing
-  `AssemblyLinearVelocity`, so they don't trip the same detection. Only one runs
-  at a time.
+- **Auto Left / Auto Right** - two big side-by-side buttons that walk the fixed
+  base waypoints (`AP_L1/AP_L2`, `AP_R1/AP_R2`) and switch off when the route
+  finishes. They drive the same `LinearVelocity` plane mover as the boost instead
+  of writing `AssemblyLinearVelocity`, so they don't trip the same detection. Only
+  one runs at a time; the active side lights crimson.
 - **Auto Grab** - half-autograb steal loop. Finds the nearest "Steal" prompt on
   another base within reach, grabs the prompt's own hold/trigger connections
   (`getconnections`) and fires them, so the steal goes through the game's normal
@@ -36,10 +36,11 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
 
 ## Mobile + PC
 
-Works with both touch and mouse (toggles use `Activated`, dragging handles
-`Touch`). The panel auto-sizes: ~30% bigger and more tappable on phones
+Works with both touch and mouse (buttons/toggles use `Activated`, dragging
+handles `Touch`). The panel auto-sizes: a touch nudge bigger on phones
 (`IS_MOBILE`), normal on PC, and clamped down to fit small screens - driven by a
 single `panelScale` `UIScale` that also re-fits on rotation / window resize.
+Every button also plays a click sound on press.
 
 ## Performance
 
