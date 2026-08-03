@@ -9,7 +9,7 @@ local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local CLICK_OFFSET = 1
+local CLICK_OFFSET = 0.4
 local clickSound = Instance.new("Sound")
 clickSound.SoundId = "rbxassetid://88073348503000"
 clickSound.Volume = 1
