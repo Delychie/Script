@@ -9,6 +9,7 @@ local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+local CLICK_OFFSET = 1
 local clickSound = Instance.new("Sound")
 clickSound.SoundId = "rbxassetid://88073348503000"
 clickSound.Volume = 1
@@ -17,8 +18,8 @@ task.spawn(function()
 	pcall(function() game:GetService("ContentProvider"):PreloadAsync({ clickSound }) end)
 end)
 local function playClick()
-	clickSound.TimePosition = 0
 	clickSound:Play()
+	clickSound.TimePosition = CLICK_OFFSET
 end
 local function hookClick(btn: TextButton)
 	btn.InputBegan:Connect(function(i)
@@ -519,6 +520,9 @@ local grab = {
 	data = {},
 	busy = false,
 	conn = nil,
+	stealing = false,
+	stealStart = 0,
+	stealFlash = 0,
 }
 
 local function grabIsMyPlot(plotName)
@@ -615,6 +619,8 @@ local function grabExecute(prompt)
 	data.ready = false
 	grab.busy = true
 	local start = tick()
+	grab.stealing = true
+	grab.stealStart = start
 	task.spawn(function()
 		for _, fn in ipairs(data.hold) do task.spawn(fn) end
 		task.wait(grab.holdMin)
@@ -625,10 +631,12 @@ local function grabExecute(prompt)
 			if grabPromptDist(prompt) <= grab.fireRange then
 				if not inRange then task.wait(grab.entryDelay) end
 				for _, fn in ipairs(data.trigger) do task.spawn(fn) end
+				grab.stealFlash = tick()
 				break
 			end
 			task.wait()
 		end
+		grab.stealing = false
 		task.wait(0.05)
 		data.ready = true
 		grab.busy = false
@@ -647,6 +655,7 @@ end
 local function stopAutoGrab()
 	if grab.conn then grab.conn:Disconnect(); grab.conn = nil end
 	grab.busy = false
+	grab.stealing = false
 end
 
 local resetRemote = nil
@@ -1334,11 +1343,14 @@ end
 
 setAutoLeftVisual, setAutoRightVisual = makeAutoRow(160)
 
+local setStealBarVisible: ((boolean) -> ())? = nil
+
 local setAutoGrabVisual
 setAutoGrabVisual = makeSwitchRow("AutoGrab", "AUTO GRAB", 206, function()
 	grab.enabled = not grab.enabled
 	if grab.enabled then startAutoGrab() else stopAutoGrab() end
 	setAutoGrabVisual(grab.enabled)
+	if setStealBarVisible then setStealBarVisible(grab.enabled) end
 end)
 
 setAntiDieVisual = makeSwitchRow("AntiDie", "ANTI DIE", 244, function()
@@ -1349,60 +1361,242 @@ setInfJumpVisual = makeSwitchRow("InfJump", "INF JUMP", 282, function()
 	setInfJump(not infJump)
 end)
 
-local function makeButtonRow(name: string, labelText: string, btnText: string, y: number, onClick: () -> ())
-	local row = Instance.new("Frame")
-	row.Name = name .. "Row"
-	row.Size = UDim2.new(1, -20, 0, 32)
-	row.Position = UDim2.fromOffset(10, y)
-	row.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
-	row.BorderSizePixel = 0
-	row.ZIndex = 2
-	row.Parent = panel
-	round(row, 6)
-	edgeStroke(row, Color3.fromRGB(62, 62, 70), 1, 0.25)
-
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(0.5, 0, 1, 0)
-	label.Position = UDim2.fromOffset(10, 0)
-	label.BackgroundTransparency = 1
-	label.Text = labelText
-	label.Font = FONT
-	label.TextSize = 15
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.TextColor3 = TEXT
-	label.ZIndex = 3
-	label.Parent = row
-
+local function makeFlatButton(name: string, labelText: string, y: number, onClick: () -> ())
 	local btn = Instance.new("TextButton")
-	btn.AnchorPoint = Vector2.new(1, 0.5)
-	btn.Size = UDim2.fromOffset(84, 24)
-	btn.Position = UDim2.new(1, -10, 0.5, 0)
-	btn.BackgroundColor3 = REDDISH_BLACK
-	btn.Text = btnText
+	btn.Name = name .. "Button"
+	btn.Size = UDim2.new(1, -20, 0, 32)
+	btn.Position = UDim2.fromOffset(10, y)
+	btn.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
+	btn.Text = labelText
 	btn.Font = FONT
-	btn.TextSize = 13
-	btn.TextColor3 = Color3.fromRGB(235, 235, 235)
+	btn.TextSize = 16
+	btn.TextColor3 = TEXT
 	btn.AutoButtonColor = false
-	btn.ZIndex = 4
-	btn.Parent = row
-	round(btn, 5)
-	edgeStroke(btn, RED_MID, 1, 0.3)
+	btn.ZIndex = 2
+	btn.Parent = panel
+	round(btn, 6)
+	edgeStroke(btn, Color3.fromRGB(62, 62, 70), 1, 0.25)
 	local sc = Instance.new("UIScale")
 	sc.Parent = btn
 
 	btn.MouseEnter:Connect(function()
-		TweenService:Create(btn, TweenInfo.new(0.1), { BackgroundColor3 = CRIMSON }):Play()
+		TweenService:Create(btn, TweenInfo.new(0.1), { BackgroundColor3 = CRIMSON, TextColor3 = Color3.fromRGB(255, 235, 235) }):Play()
 	end)
 	btn.MouseLeave:Connect(function()
-		TweenService:Create(btn, TweenInfo.new(0.1), { BackgroundColor3 = REDDISH_BLACK }):Play()
+		TweenService:Create(btn, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(34, 34, 38), TextColor3 = TEXT }):Play()
 	end)
 	btn.Activated:Connect(function()
-		punch(sc, 0.85)
+		punch(sc, 0.9)
 		onClick()
+	end)
+	return btn
+end
+
+makeFlatButton("InstantReset", "INSTANT RESET", 358, instantReset)
+
+local stealBar = Instance.new("Frame")
+stealBar.Name = "StealBar"
+stealBar.AnchorPoint = Vector2.new(0.5, 1)
+stealBar.Size = UDim2.fromOffset(240, 46)
+stealBar.Position = UDim2.new(0.5, 0, 1, 46)
+stealBar.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+stealBar.BorderSizePixel = 0
+stealBar.Visible = false
+stealBar.ZIndex = 15
+stealBar.Parent = gui
+round(stealBar, 8)
+edgeStroke(stealBar, REDDISH_BLACK, 1.5, 0.1)
+local stealBarScale = Instance.new("UIScale")
+stealBarScale.Parent = stealBar
+
+local stealGrad = Instance.new("UIGradient")
+stealGrad.Rotation = 90
+stealGrad.Color = ColorSequence.new(Color3.fromRGB(30, 30, 34), Color3.fromRGB(16, 16, 18))
+stealGrad.Parent = stealBar
+
+local stealLabel = Instance.new("TextLabel")
+stealLabel.Name = "Label"
+stealLabel.Size = UDim2.new(1, -20, 0, 16)
+stealLabel.Position = UDim2.fromOffset(10, 5)
+stealLabel.BackgroundTransparency = 1
+stealLabel.Text = "AUTO GRAB"
+stealLabel.Font = FONT
+stealLabel.TextSize = 13
+stealLabel.TextXAlignment = Enum.TextXAlignment.Left
+stealLabel.TextColor3 = TEXT
+stealLabel.TextStrokeTransparency = 0.6
+stealLabel.ZIndex = 16
+stealLabel.Parent = stealBar
+
+local stealTrack = Instance.new("Frame")
+stealTrack.Name = "Track"
+stealTrack.AnchorPoint = Vector2.new(0.5, 1)
+stealTrack.Size = UDim2.new(1, -20, 0, 12)
+stealTrack.Position = UDim2.new(0.5, 0, 1, -8)
+stealTrack.BackgroundColor3 = Color3.fromRGB(14, 14, 16)
+stealTrack.BorderSizePixel = 0
+stealTrack.ZIndex = 16
+stealTrack.Parent = stealBar
+round(stealTrack, 6)
+edgeStroke(stealTrack, Color3.fromRGB(8, 8, 10), 1, 0.2)
+
+local stealFill = Instance.new("Frame")
+stealFill.Name = "Fill"
+stealFill.Size = UDim2.new(0, 0, 1, 0)
+stealFill.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+stealFill.BorderSizePixel = 0
+stealFill.ZIndex = 17
+stealFill.Parent = stealTrack
+round(stealFill, 6)
+local stealFillGrad = Instance.new("UIGradient")
+stealFillGrad.Color = ColorSequence.new(CRIMSON, SCARLET)
+stealFillGrad.Parent = stealFill
+
+local SB_SHOW = UDim2.new(0.5, 0, 1, -26)
+local SB_HIDE = UDim2.new(0.5, 0, 1, 46)
+local sbVisible = false
+
+setStealBarVisible = function(on: boolean)
+	if on == sbVisible then
+		return
+	end
+	sbVisible = on
+	if on then
+		stealBar.Visible = true
+		stealBar.Position = SB_HIDE
+		stealBarScale.Scale = 0.7
+		TweenService:Create(stealBar, TweenInfo.new(0.32, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Position = SB_SHOW }):Play()
+		TweenService:Create(stealBarScale, TweenInfo.new(0.32, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	else
+		local tw = TweenService:Create(stealBar, TweenInfo.new(0.24, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Position = SB_HIDE })
+		tw:Play()
+		TweenService:Create(stealBarScale, TweenInfo.new(0.24), { Scale = 0.7 }):Play()
+		tw.Completed:Connect(function()
+			if not sbVisible then
+				stealBar.Visible = false
+			end
+		end)
+	end
+end
+
+do
+	local shownFill = 0
+	local lastText = ""
+	RunService.Heartbeat:Connect(function(dt)
+		if not sbVisible then
+			return
+		end
+		local flashing = (tick() - grab.stealFlash) < 0.45
+		local target = 0
+		if grab.stealing then
+			target = math.clamp((tick() - grab.stealStart) / grab.holdMax, 0.02, 1)
+		end
+		if flashing then
+			target = 1
+		end
+		shownFill = shownFill + (target - shownFill) * math.min(dt * 12, 1)
+		stealFill.Size = UDim2.new(shownFill, 0, 1, 0)
+
+		local txt = "AUTO GRAB"
+		if flashing then
+			txt = "STOLEN"
+		elseif grab.stealing then
+			txt = "STEALING"
+		end
+		if txt ~= lastText then
+			lastText = txt
+			stealLabel.Text = txt
+			stealLabel.TextColor3 = (flashing and SCARLET) or (grab.stealing and RED_BRIGHT) or TEXT
+		end
 	end)
 end
 
-makeButtonRow("InstantReset", "INSTANT RESET", "RESET", 358, instantReset)
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "ToggleButton"
+toggleBtn.AnchorPoint = Vector2.new(0.5, 0)
+toggleBtn.Size = UDim2.fromOffset(46, 46)
+toggleBtn.Position = UDim2.new(0.5, 0, 0, 12)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
+toggleBtn.Text = ""
+toggleBtn.AutoButtonColor = false
+toggleBtn.Active = true
+toggleBtn.ZIndex = 20
+toggleBtn.Parent = gui
+round(toggleBtn, 12)
+edgeStroke(toggleBtn, REDDISH_BLACK, 2, 0)
+local toggleGrad = Instance.new("UIGradient")
+toggleGrad.Rotation = 90
+toggleGrad.Color = ColorSequence.new(Color3.fromRGB(30, 30, 34), Color3.fromRGB(14, 14, 16))
+toggleGrad.Parent = toggleBtn
+local toggleScale = Instance.new("UIScale")
+toggleScale.Parent = toggleBtn
+
+local toggleIcon = Instance.new("ImageLabel")
+toggleIcon.Name = "Icon"
+toggleIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+toggleIcon.Position = UDim2.fromScale(0.5, 0.5)
+toggleIcon.Size = UDim2.fromOffset(28, 28)
+toggleIcon.BackgroundTransparency = 1
+toggleIcon.Image = DUST_IMAGE
+toggleIcon.ScaleType = Enum.ScaleType.Fit
+toggleIcon.ImageColor3 = Color3.fromRGB(230, 60, 60)
+toggleIcon.ZIndex = 21
+toggleIcon.Parent = toggleBtn
+
+local panelVisible = true
+local function setPanelVisible(v: boolean)
+	if v == panelVisible then
+		return
+	end
+	panelVisible = v
+	punch(toggleScale, 0.8)
+	if v then
+		panel.Visible = true
+		panelScale.Scale = deviceScale * 0.6
+		TweenService:Create(panelScale, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = deviceScale }):Play()
+	else
+		local tw = TweenService:Create(panelScale, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = deviceScale * 0.5 })
+		tw:Play()
+		tw.Completed:Connect(function()
+			if not panelVisible then
+				panel.Visible = false
+			end
+		end)
+	end
+end
+
+do
+	local dragging, moved, dragStart, startPos = false, false, nil, nil
+	toggleBtn.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			moved = false
+			dragStart = input.Position
+			startPos = toggleBtn.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+					if not moved then
+						setPanelVisible(not panelVisible)
+					end
+				end
+			end)
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			local delta = input.Position - dragStart
+			if delta.Magnitude > 6 then
+				moved = true
+			end
+			toggleBtn.Position = UDim2.new(
+				startPos.X.Scale, startPos.X.Offset + delta.X,
+				startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+end
 
 do
 	local dragging, dragStart, startPos = false, nil, nil

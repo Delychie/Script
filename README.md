@@ -24,7 +24,10 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
 - **Auto Grab** - half-autograb steal loop. Finds the nearest "Steal" prompt on
   another base within reach, grabs the prompt's own hold/trigger connections
   (`getconnections`) and fires them, so the steal goes through the game's normal
-  path. Executor-only.
+  path. Executor-only. Turning it on slides a **steal bar** up from the bottom of
+  the screen (Back-eased appear animation); the bar fills crimson to scarlet as a
+  steal holds and flashes "STOLEN" when it lands, then hides when you switch Auto
+  Grab off.
 - **Inf Jump** - jump again any time you press jump, even mid-air. It uses the
   same `LinearVelocity` idea as the boost: a Line-mode constraint pinned to the
   world Y axis that pulses an upward `LineVelocity` for a split second on each
@@ -36,14 +39,17 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
   joints intact (`BreakJointsOnDeath = false`) while it's on. Reapplies itself on
   respawn, and the setting persists across rejoins. Only touches your own
   character.
-- **Instant Reset** - a RESET button that fires the game's `RE/...` reset remote
-  (captured by hooking `FireServer`) with the reset GUID, spamming until you die.
-  Rebindable in the original; here it's the button. Executor-only.
+- **Instant Reset** - a flat full-width button that fires the game's `RE/...`
+  reset remote (captured by hooking `FireServer`) with the reset GUID, spamming
+  until you die. Executor-only.
 - **Speed Counter** - a Minecraft-style slide switch (stone track + redstone-block
   knob that lights up and slides right when on). Turns the head readout on/off,
   independent of the boost.
 - The active speed row's label lights red so you can see the live mode.
 - The panel is draggable, and its position is remembered.
+- **Toggle button** - a small draggable redstone button floats at the top of the
+  screen; tap it to hide or show the whole panel (it scales/springs in and out),
+  drag it to move it. Same idea as the del hub open/close button.
 
 ## Mobile + PC
 
