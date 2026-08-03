@@ -243,6 +243,60 @@ end
 
 local onCarryChanged: (() -> ())? = nil
 
+local AP_L1 = Vector3.new(-476.47, -6.28, 92.73)
+local AP_L2 = Vector3.new(-483.12, -4.95, 94.81)
+local AP_R1 = Vector3.new(-476.16, -6.52, 25.62)
+local AP_R2 = Vector3.new(-483.06, -5.03, 25.48)
+local AUTO_LEFT_WPS = { AP_L1, AP_L2 }
+local AUTO_RIGHT_WPS = { AP_R1, AP_R2 }
+local AUTO_ARRIVE = 2.5
+
+local autoLeftEnabled = false
+local autoRightEnabled = false
+local autoPhase = 1
+local setAutoLeftVisual: ((boolean) -> ())? = nil
+local setAutoRightVisual: ((boolean) -> ())? = nil
+
+local function stopAutoPath()
+	autoLeftEnabled = false
+	autoRightEnabled = false
+	autoPhase = 1
+	if setAutoLeftVisual then setAutoLeftVisual(false) end
+	if setAutoRightVisual then setAutoRightVisual(false) end
+	if linearVelocity then
+		linearVelocity.Enabled = false
+		linearVelocity.PlaneVelocity = Vector2.zero
+	end
+end
+
+local function setAutoLeft(on: boolean)
+	autoLeftEnabled = on
+	autoPhase = 1
+	if on and autoRightEnabled then
+		autoRightEnabled = false
+		if setAutoRightVisual then setAutoRightVisual(false) end
+	end
+	if setAutoLeftVisual then setAutoLeftVisual(on) end
+	if not on and not autoRightEnabled and linearVelocity then
+		linearVelocity.Enabled = false
+		linearVelocity.PlaneVelocity = Vector2.zero
+	end
+end
+
+local function setAutoRight(on: boolean)
+	autoRightEnabled = on
+	autoPhase = 1
+	if on and autoLeftEnabled then
+		autoLeftEnabled = false
+		if setAutoLeftVisual then setAutoLeftVisual(false) end
+	end
+	if setAutoRightVisual then setAutoRightVisual(on) end
+	if not on and not autoLeftEnabled and linearVelocity then
+		linearVelocity.Enabled = false
+		linearVelocity.PlaneVelocity = Vector2.zero
+	end
+end
+
 local function measureHorizontalSpeed(): number
 	if not rootPart then
 		return 0
@@ -354,15 +408,52 @@ RunService.Heartbeat:Connect(function()
 		return
 	end
 
-	if not enabled or not humanoid or humanoid.Health <= 0 then
+	local hum = humanoid
+	local hrp = rootPart
+	if not hum or not hrp or hum.Health <= 0 then
 		velocity.Enabled = false
 		velocity.PlaneVelocity = Vector2.zero
 		return
 	end
 
-	local moveDirection = humanoid.MoveDirection
-	if moveDirection.Magnitude <= 0.01 then
+	if autoLeftEnabled or autoRightEnabled then
+		local st = hum:GetState()
+		if st == Enum.HumanoidStateType.Physics or st == Enum.HumanoidStateType.Ragdoll or st == Enum.HumanoidStateType.FallingDown then
+			velocity.Enabled = false
+			return
+		end
+		local wps = autoLeftEnabled and AUTO_LEFT_WPS or AUTO_RIGHT_WPS
+		local target = wps[autoPhase]
+		if not target then
+			stopAutoPath()
+			return
+		end
+		local pos = hrp.Position
+		local flat = Vector3.new(target.X - pos.X, 0, target.Z - pos.Z)
+		if flat.Magnitude < AUTO_ARRIVE then
+			autoPhase += 1
+			if autoPhase > #wps then
+				stopAutoPath()
+			end
+			velocity.Enabled = false
+			velocity.PlaneVelocity = Vector2.zero
+			return
+		end
+		local dir = flat.Unit
+		local spd = getNormalSpeed()
+		velocity.PlaneVelocity = Vector2.new(dir.X * spd, dir.Z * spd)
+		velocity.Enabled = true
+		return
+	end
 
+	if not enabled then
+		velocity.Enabled = false
+		velocity.PlaneVelocity = Vector2.zero
+		return
+	end
+
+	local moveDirection = hum.MoveDirection
+	if moveDirection.Magnitude <= 0.01 then
 		velocity.Enabled = false
 		velocity.PlaneVelocity = Vector2.zero
 		return
@@ -480,7 +571,7 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
 local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
-local PANEL_W, PANEL_H = 250, 200
+local PANEL_W, PANEL_H = 250, 276
 local function computeScale(): number
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
@@ -727,7 +818,7 @@ leverButton.Parent = toggleRow
 local counterRow = Instance.new("Frame")
 counterRow.Name = "CounterRow"
 counterRow.Size = UDim2.new(1, -20, 0, 32)
-counterRow.Position = UDim2.fromOffset(10, 160)
+counterRow.Position = UDim2.fromOffset(10, 236)
 counterRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 counterRow.BorderSizePixel = 0
 counterRow.ZIndex = 2
@@ -783,6 +874,83 @@ counterButton.Text = ""
 counterButton.AutoButtonColor = false
 counterButton.ZIndex = 6
 counterButton.Parent = counterRow
+
+local function makeSwitchRow(name: string, labelText: string, y: number, onClick: () -> ())
+	local row = Instance.new("Frame")
+	row.Name = name .. "Row"
+	row.Size = UDim2.new(1, -20, 0, 32)
+	row.Position = UDim2.fromOffset(10, y)
+	row.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
+	row.BorderSizePixel = 0
+	row.ZIndex = 2
+	row.Parent = panel
+	round(row, 6)
+	edgeStroke(row, Color3.fromRGB(62, 62, 70), 1, 0.25)
+	row.MouseEnter:Connect(function()
+		TweenService:Create(row, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(46, 46, 52) }):Play()
+	end)
+	row.MouseLeave:Connect(function()
+		TweenService:Create(row, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(34, 34, 38) }):Play()
+	end)
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0.6, 0, 1, 0)
+	label.Position = UDim2.fromOffset(10, 0)
+	label.BackgroundTransparency = 1
+	label.Text = labelText
+	label.Font = FONT
+	label.TextSize = 15
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextColor3 = TEXT
+	label.ZIndex = 3
+	label.Parent = row
+
+	local track = Instance.new("Frame")
+	track.AnchorPoint = Vector2.new(1, 0.5)
+	track.Size = UDim2.fromOffset(44, 18)
+	track.Position = UDim2.new(1, -10, 0.5, 0)
+	track.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+	track.BorderSizePixel = 0
+	track.ZIndex = 3
+	track.Parent = row
+	round(track, 9)
+	edgeStroke(track, Color3.fromRGB(8, 8, 10), 1, 0.1)
+
+	local knob = Instance.new("Frame")
+	knob.Size = UDim2.fromOffset(16, 16)
+	knob.Position = UDim2.new(0, 1, 0.5, -8)
+	knob.BackgroundColor3 = Color3.fromRGB(70, 70, 76)
+	knob.BorderSizePixel = 0
+	knob.ZIndex = 4
+	knob.Parent = track
+	round(knob, 8)
+
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.fromScale(1, 1)
+	btn.BackgroundTransparency = 1
+	btn.Text = ""
+	btn.AutoButtonColor = false
+	btn.ZIndex = 6
+	btn.Parent = row
+	btn.Activated:Connect(onClick)
+
+	return function(on: boolean)
+		TweenService:Create(knob, TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+			Position = on and UDim2.new(1, -17, 0.5, -8) or UDim2.new(0, 1, 0.5, -8),
+		}):Play()
+		TweenService:Create(knob, TweenInfo.new(0.16), {
+			BackgroundColor3 = on and RED_BRIGHT or Color3.fromRGB(70, 70, 76),
+		}):Play()
+		label.TextColor3 = on and RED_BRIGHT or TEXT
+	end
+end
+
+setAutoLeftVisual = makeSwitchRow("AutoLeft", "AUTO LEFT", 160, function()
+	setAutoLeft(not autoLeftEnabled)
+end)
+setAutoRightVisual = makeSwitchRow("AutoRight", "AUTO RIGHT", 198, function()
+	setAutoRight(not autoRightEnabled)
+end)
 
 do
 	local dragging, dragStart, startPos = false, nil, nil

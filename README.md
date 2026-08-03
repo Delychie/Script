@@ -16,6 +16,11 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
 - Both clamped to 0–1000; type a number and press Enter.
 - **Lever** - flip it to toggle the boost; the lamp, knob and border light up
   red ("powered").
+- **Auto Left / Auto Right** - walk the two fixed base waypoints (`AP_L1/AP_L2`,
+  `AP_R1/AP_R2`) and flip off when the route finishes. They drive the same
+  `LinearVelocity` plane mover as the boost instead of writing
+  `AssemblyLinearVelocity`, so they don't trip the same detection. Only one runs
+  at a time.
 - **Speed Counter** - a Minecraft-style slide switch (stone track + redstone-block
   knob that lights up and slides right when on). Turns the head readout on/off,
   independent of the boost.
