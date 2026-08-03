@@ -70,6 +70,7 @@ local enabled = false
 local normalSpeed = DEFAULT_NORMAL_SPEED
 local carrySpeed = DEFAULT_CARRY_SPEED
 local carrying = false
+local antiDie = false
 
 local character: Model? = nil
 local humanoid: Humanoid? = nil
@@ -108,6 +109,7 @@ local function saveConfig()
 		carrySpeed = carrySpeed,
 		enabled = enabled,
 		counterEnabled = counterEnabled,
+		antiDie = antiDie,
 		guiPos = savedGuiPos,
 	}
 	pcall(function()
@@ -227,6 +229,8 @@ local function buildCounter()
 	counterLabel = label
 end
 
+local onCharacterReady: (() -> ())? = nil
+
 local function onCharacterAdded(newCharacter: Model)
 	character = newCharacter
 	humanoid = newCharacter:WaitForChild("Humanoid") :: Humanoid
@@ -234,6 +238,9 @@ local function onCharacterAdded(newCharacter: Model)
 	head = newCharacter:WaitForChild("Head") :: BasePart
 	buildMover()
 	buildCounter()
+	if onCharacterReady then
+		onCharacterReady()
+	end
 end
 
 local function isCarryingBrainrot(): boolean
@@ -685,6 +692,41 @@ local function instantReset()
 	end)
 end
 
+local setAntiDieVisual: ((boolean) -> ())? = nil
+
+local function applyAntiDieState()
+	local hum = humanoid
+	if not hum then
+		return
+	end
+	hum.BreakJointsOnDeath = not antiDie
+	pcall(function()
+		hum:SetStateEnabled(Enum.HumanoidStateType.Dead, not antiDie)
+	end)
+	if antiDie and hum.Health < hum.MaxHealth then
+		hum.Health = hum.MaxHealth
+	end
+end
+
+onCharacterReady = function()
+	applyAntiDieState()
+end
+
+RunService.Heartbeat:Connect(function()
+	if antiDie and humanoid and humanoid.Health < humanoid.MaxHealth then
+		humanoid.Health = humanoid.MaxHealth
+	end
+end)
+
+local function setAntiDie(on: boolean)
+	antiDie = on
+	applyAntiDieState()
+	if setAntiDieVisual then
+		setAntiDieVisual(on)
+	end
+	saveConfig()
+end
+
 local function round(inst: GuiObject, radius: number)
 	local c = Instance.new("UICorner")
 	c.CornerRadius = UDim.new(0, radius)
@@ -792,7 +834,7 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
 local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
-local PANEL_W, PANEL_H = 250, 322
+local PANEL_W, PANEL_H = 250, 360
 local function computeScale(): number
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
@@ -1039,7 +1081,7 @@ leverButton.Parent = toggleRow
 local counterRow = Instance.new("Frame")
 counterRow.Name = "CounterRow"
 counterRow.Size = UDim2.new(1, -20, 0, 32)
-counterRow.Position = UDim2.fromOffset(10, 244)
+counterRow.Position = UDim2.fromOffset(10, 282)
 counterRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 counterRow.BorderSizePixel = 0
 counterRow.ZIndex = 2
@@ -1242,6 +1284,10 @@ setAutoGrabVisual = makeSwitchRow("AutoGrab", "AUTO GRAB", 206, function()
 	setAutoGrabVisual(grab.enabled)
 end)
 
+setAntiDieVisual = makeSwitchRow("AntiDie", "ANTI DIE", 244, function()
+	setAntiDie(not antiDie)
+end)
+
 local function makeButtonRow(name: string, labelText: string, btnText: string, y: number, onClick: () -> ())
 	local row = Instance.new("Frame")
 	row.Name = name .. "Row"
@@ -1295,7 +1341,7 @@ local function makeButtonRow(name: string, labelText: string, btnText: string, y
 	end)
 end
 
-makeButtonRow("InstantReset", "INSTANT RESET", "RESET", 282, instantReset)
+makeButtonRow("InstantReset", "INSTANT RESET", "RESET", 320, instantReset)
 
 do
 	local dragging, dragStart, startPos = false, nil, nil
@@ -1453,12 +1499,14 @@ setNormalSpeed(DEFAULT_NORMAL_SPEED)
 setCarrySpeed(DEFAULT_CARRY_SPEED)
 setEnabled(false)
 setCounterEnabled(false)
+setAntiDie(false)
 
 local savedCfg = loadConfig()
 if savedCfg then
 	if type(savedCfg.normalSpeed) == "number" then setNormalSpeed(savedCfg.normalSpeed) end
 	if type(savedCfg.carrySpeed) == "number" then setCarrySpeed(savedCfg.carrySpeed) end
 	if savedCfg.counterEnabled ~= nil then setCounterEnabled(savedCfg.counterEnabled == true) end
+	if savedCfg.antiDie ~= nil then setAntiDie(savedCfg.antiDie == true) end
 	if savedCfg.enabled ~= nil then setEnabled(savedCfg.enabled == true) end
 	if type(savedCfg.guiPos) == "table" and #savedCfg.guiPos >= 4 then
 		savedGuiPos = savedCfg.guiPos

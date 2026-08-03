@@ -25,6 +25,11 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
   another base within reach, grabs the prompt's own hold/trigger connections
   (`getconnections`) and fires them, so the steal goes through the game's normal
   path. Executor-only.
+- **Anti Die** - keeps your own character alive: tops your `Humanoid.Health` back
+  to `MaxHealth` each frame, disables the `Dead` humanoid state and leaves your
+  joints intact (`BreakJointsOnDeath = false`) while it's on. Reapplies itself on
+  respawn, and the setting persists across rejoins. Only touches your own
+  character.
 - **Instant Reset** - a RESET button that fires the game's `RE/...` reset remote
   (captured by hooking `FireServer`) with the reset GUID, spamming until you die.
   Rebindable in the original; here it's the button. Executor-only.
@@ -55,8 +60,8 @@ frame.
 Settings persist across rejoins automatically (executor filesystem - needs
 `writefile`/`readfile`/`isfile`; silently no-ops without them). Whenever you
 change a value it writes `dely_booster_test67.json`, and on load it applies the
-saved **normal speed, carry speed, boost on/off, speed-counter on/off, and panel
-position**. No save button - it just remembers.
+saved **normal speed, carry speed, boost on/off, speed-counter on/off, anti-die
+on/off, and panel position**. No save button - it just remembers.
 
 The look uses `Enum.Font.Arcade` (the closest built-in to Minecraftia) with
 rounded corners (`UICorner`) throughout and soft edge strokes - light rims on
