@@ -900,7 +900,7 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
 local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
-local PANEL_W, PANEL_H = 250, 398
+local PANEL_W, PANEL_H = 250, 236
 local function computeScale(): number
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
@@ -958,35 +958,114 @@ do
 	end
 end
 
+local TITLE_H = 34
+local TAB_Y = 42
+local TAB_H = 26
+local CONTENT_TOP = 78
+
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, TITLE_H)
+titleBar.BackgroundTransparency = 1
+titleBar.ZIndex = 2
+titleBar.Parent = panel
+
 local dust = Instance.new("ImageLabel")
 dust.Name = "RedstoneDust"
 dust.AnchorPoint = Vector2.new(0.5, 0.5)
 dust.Size = UDim2.fromOffset(20, 20)
-dust.Position = UDim2.new(0, 20, 0, 26)
+dust.Position = UDim2.new(0, 20, 0.5, 3)
 dust.BackgroundTransparency = 1
 dust.Image = DUST_IMAGE
 dust.ScaleType = Enum.ScaleType.Fit
 dust.ImageColor3 = RED_DIM
 dust.ZIndex = 3
-dust.Parent = panel
-table.insert(redstoneImages, dust)
+dust.Parent = titleBar
 
 local title = Instance.new("TextLabel")
 title.Name = "Title"
-title.Size = UDim2.new(1, -46, 0, 24)
-title.Position = UDim2.fromOffset(36, 14)
+title.Size = UDim2.new(1, -46, 1, 0)
+title.Position = UDim2.fromOffset(36, 3)
 title.BackgroundTransparency = 1
 title.Text = "DELY BOOSTER TEST 67"
 title.Font = FONT
-title.TextSize = 17
+title.TextSize = 16
 title.TextColor3 = Color3.fromRGB(245, 245, 248)
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.TextStrokeTransparency = 0.5
 title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 title.ZIndex = 3
-title.Parent = panel
+title.Parent = titleBar
 
-local function makeSpeedRow(name: string, labelText: string, defaultValue: number, y: number)
+local tabBar = Instance.new("Frame")
+tabBar.Name = "TabBar"
+tabBar.Size = UDim2.new(1, -20, 0, TAB_H)
+tabBar.Position = UDim2.fromOffset(10, TAB_Y)
+tabBar.BackgroundTransparency = 1
+tabBar.ZIndex = 2
+tabBar.Parent = panel
+
+local function makeTab(): (Frame, UIScale)
+	local c = Instance.new("Frame")
+	c.Name = "TabContent"
+	c.Size = UDim2.new(1, 0, 1, -CONTENT_TOP - 8)
+	c.Position = UDim2.fromOffset(0, CONTENT_TOP)
+	c.BackgroundTransparency = 1
+	c.Visible = false
+	c.ZIndex = 2
+	c.Parent = panel
+	local sc = Instance.new("UIScale")
+	sc.Parent = c
+	return c, sc
+end
+
+local moveTab, moveScale = makeTab()
+local autoTab, autoScale = makeTab()
+local playerTab, playerScale = makeTab()
+
+local tabContents = { moveTab, autoTab, playerTab }
+local tabScales = { moveScale, autoScale, playerScale }
+local tabDefs = { "MOVE", "AUTO", "PLAYER" }
+local tabButtons: { TextButton } = {}
+local activeTab = 1
+
+local function setTab(index: number)
+	activeTab = index
+	for i, content in ipairs(tabContents) do
+		content.Visible = (i == index)
+	end
+	for i, btn in ipairs(tabButtons) do
+		local on = i == index
+		TweenService:Create(btn, TweenInfo.new(0.14), {
+			BackgroundColor3 = on and CRIMSON or Color3.fromRGB(30, 30, 34),
+		}):Play()
+		btn.TextColor3 = on and Color3.fromRGB(255, 235, 235) or SUBTEXT
+	end
+	punch(tabScales[index], 0.95)
+end
+
+for i, name in ipairs(tabDefs) do
+	local btn = Instance.new("TextButton")
+	btn.Name = name .. "Tab"
+	btn.Size = UDim2.new(1 / 3, -4, 1, 0)
+	btn.Position = UDim2.new((i - 1) / 3, 2, 0, 0)
+	btn.BackgroundColor3 = Color3.fromRGB(30, 30, 34)
+	btn.Text = name
+	btn.Font = FONT
+	btn.TextSize = 14
+	btn.TextColor3 = SUBTEXT
+	btn.AutoButtonColor = false
+	btn.ZIndex = 3
+	btn.Parent = tabBar
+	round(btn, 6)
+	edgeStroke(btn, Color3.fromRGB(62, 62, 70), 1, 0.4)
+	btn.Activated:Connect(function()
+		setTab(i)
+	end)
+	tabButtons[i] = btn
+end
+
+local function makeSpeedRow(name: string, labelText: string, defaultValue: number, y: number, parent: Instance)
 	local row = Instance.new("Frame")
 	row.Name = name .. "Row"
 	row.Size = UDim2.new(1, -20, 0, 32)
@@ -994,7 +1073,7 @@ local function makeSpeedRow(name: string, labelText: string, defaultValue: numbe
 	row.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 	row.BorderSizePixel = 0
 	row.ZIndex = 2
-	row.Parent = panel
+	row.Parent = parent
 	round(row, 6)
 	edgeStroke(row, Color3.fromRGB(62, 62, 70), 1, 0.25)
 
@@ -1047,17 +1126,17 @@ local function makeSpeedRow(name: string, labelText: string, defaultValue: numbe
 	return box, label, boxScale
 end
 
-local normalBox, normalLabel, normalBoxScale = makeSpeedRow("Normal", "NORMAL SPEED", DEFAULT_NORMAL_SPEED, 46)
-local carryBox, carryLabel, carryBoxScale = makeSpeedRow("Carry", "CARRY SPEED", DEFAULT_CARRY_SPEED, 84)
+local normalBox, normalLabel, normalBoxScale = makeSpeedRow("Normal", "NORMAL SPEED", DEFAULT_NORMAL_SPEED, 0, moveTab)
+local carryBox, carryLabel, carryBoxScale = makeSpeedRow("Carry", "CARRY SPEED", DEFAULT_CARRY_SPEED, 38, moveTab)
 
 local toggleRow = Instance.new("Frame")
 toggleRow.Name = "ToggleRow"
 toggleRow.Size = UDim2.new(1, -20, 0, 32)
-toggleRow.Position = UDim2.fromOffset(10, 122)
+toggleRow.Position = UDim2.fromOffset(10, 76)
 toggleRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 toggleRow.BorderSizePixel = 0
 toggleRow.ZIndex = 2
-toggleRow.Parent = panel
+toggleRow.Parent = moveTab
 round(toggleRow, 6)
 edgeStroke(toggleRow, Color3.fromRGB(62, 62, 70), 1, 0.25)
 toggleRow.MouseEnter:Connect(function()
@@ -1144,67 +1223,7 @@ leverButton.AutoButtonColor = false
 leverButton.ZIndex = 6
 leverButton.Parent = toggleRow
 
-local counterRow = Instance.new("Frame")
-counterRow.Name = "CounterRow"
-counterRow.Size = UDim2.new(1, -20, 0, 32)
-counterRow.Position = UDim2.fromOffset(10, 320)
-counterRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
-counterRow.BorderSizePixel = 0
-counterRow.ZIndex = 2
-counterRow.Parent = panel
-round(counterRow, 6)
-edgeStroke(counterRow, Color3.fromRGB(62, 62, 70), 1, 0.25)
-counterRow.MouseEnter:Connect(function()
-	TweenService:Create(counterRow, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(46, 46, 52) }):Play()
-end)
-counterRow.MouseLeave:Connect(function()
-	TweenService:Create(counterRow, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(34, 34, 38) }):Play()
-end)
-
-local counterLabelUi = Instance.new("TextLabel")
-counterLabelUi.Name = "Label"
-counterLabelUi.Size = UDim2.new(0.6, 0, 1, 0)
-counterLabelUi.Position = UDim2.fromOffset(10, 0)
-counterLabelUi.BackgroundTransparency = 1
-counterLabelUi.Text = "SPEED COUNTER"
-counterLabelUi.Font = FONT
-counterLabelUi.TextSize = 15
-counterLabelUi.TextXAlignment = Enum.TextXAlignment.Left
-counterLabelUi.TextColor3 = TEXT
-counterLabelUi.ZIndex = 3
-counterLabelUi.Parent = counterRow
-
-local swTrack = Instance.new("Frame")
-swTrack.Name = "SwitchTrack"
-swTrack.AnchorPoint = Vector2.new(1, 0.5)
-swTrack.Size = UDim2.fromOffset(44, 18)
-swTrack.Position = UDim2.new(1, -10, 0.5, 0)
-swTrack.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
-swTrack.BorderSizePixel = 0
-swTrack.ZIndex = 3
-swTrack.Parent = counterRow
-round(swTrack, 9)
-edgeStroke(swTrack, Color3.fromRGB(8, 8, 10), 1, 0.1)
-
-local swKnob = Instance.new("Frame")
-swKnob.Name = "SwitchKnob"
-swKnob.Size = UDim2.fromOffset(16, 16)
-swKnob.Position = UDim2.new(0, 1, 0.5, -8)
-swKnob.BackgroundColor3 = Color3.fromRGB(70, 70, 76)
-swKnob.BorderSizePixel = 0
-swKnob.ZIndex = 4
-swKnob.Parent = swTrack
-round(swKnob, 8)
-
-local counterButton = Instance.new("TextButton")
-counterButton.Size = UDim2.fromScale(1, 1)
-counterButton.BackgroundTransparency = 1
-counterButton.Text = ""
-counterButton.AutoButtonColor = false
-counterButton.ZIndex = 6
-counterButton.Parent = counterRow
-
-local function makeSwitchRow(name: string, labelText: string, y: number, onClick: () -> ())
+local function makeSwitchRow(name: string, labelText: string, y: number, parent: Instance, onClick: () -> ())
 	local row = Instance.new("Frame")
 	row.Name = name .. "Row"
 	row.Size = UDim2.new(1, -20, 0, 32)
@@ -1212,7 +1231,7 @@ local function makeSwitchRow(name: string, labelText: string, y: number, onClick
 	row.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 	row.BorderSizePixel = 0
 	row.ZIndex = 2
-	row.Parent = panel
+	row.Parent = parent
 	round(row, 6)
 	edgeStroke(row, Color3.fromRGB(62, 62, 70), 1, 0.25)
 	row.MouseEnter:Connect(function()
@@ -1274,14 +1293,18 @@ local function makeSwitchRow(name: string, labelText: string, y: number, onClick
 	end
 end
 
-local function makeAutoRow(y: number)
+setInfJumpVisual = makeSwitchRow("InfJump", "INF JUMP", 114, moveTab, function()
+	setInfJump(not infJump)
+end)
+
+local function makeAutoRow(y: number, parent: Instance)
 	local row = Instance.new("Frame")
 	row.Name = "AutoRow"
 	row.Size = UDim2.new(1, -20, 0, 40)
 	row.Position = UDim2.fromOffset(10, y)
 	row.BackgroundTransparency = 1
 	row.ZIndex = 2
-	row.Parent = panel
+	row.Parent = parent
 
 	local function makeBtn(text: string, xScale: number)
 		local btn = Instance.new("TextButton")
@@ -1341,27 +1364,83 @@ local function makeAutoRow(y: number)
 	return styler(leftBtn), styler(rightBtn)
 end
 
-setAutoLeftVisual, setAutoRightVisual = makeAutoRow(160)
+setAutoLeftVisual, setAutoRightVisual = makeAutoRow(0, autoTab)
 
 local setStealBarVisible: ((boolean) -> ())? = nil
 
 local setAutoGrabVisual
-setAutoGrabVisual = makeSwitchRow("AutoGrab", "AUTO GRAB", 206, function()
+setAutoGrabVisual = makeSwitchRow("AutoGrab", "AUTO GRAB", 48, autoTab, function()
 	grab.enabled = not grab.enabled
 	if grab.enabled then startAutoGrab() else stopAutoGrab() end
 	setAutoGrabVisual(grab.enabled)
 	if setStealBarVisible then setStealBarVisible(grab.enabled) end
 end)
 
-setAntiDieVisual = makeSwitchRow("AntiDie", "ANTI DIE", 244, function()
+setAntiDieVisual = makeSwitchRow("AntiDie", "ANTI DIE", 0, playerTab, function()
 	setAntiDie(not antiDie)
 end)
 
-setInfJumpVisual = makeSwitchRow("InfJump", "INF JUMP", 282, function()
-	setInfJump(not infJump)
+local counterRow = Instance.new("Frame")
+counterRow.Name = "CounterRow"
+counterRow.Size = UDim2.new(1, -20, 0, 32)
+counterRow.Position = UDim2.fromOffset(10, 38)
+counterRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
+counterRow.BorderSizePixel = 0
+counterRow.ZIndex = 2
+counterRow.Parent = playerTab
+round(counterRow, 6)
+edgeStroke(counterRow, Color3.fromRGB(62, 62, 70), 1, 0.25)
+counterRow.MouseEnter:Connect(function()
+	TweenService:Create(counterRow, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(46, 46, 52) }):Play()
+end)
+counterRow.MouseLeave:Connect(function()
+	TweenService:Create(counterRow, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(34, 34, 38) }):Play()
 end)
 
-local function makeFlatButton(name: string, labelText: string, y: number, onClick: () -> ())
+local counterLabelUi = Instance.new("TextLabel")
+counterLabelUi.Name = "Label"
+counterLabelUi.Size = UDim2.new(0.6, 0, 1, 0)
+counterLabelUi.Position = UDim2.fromOffset(10, 0)
+counterLabelUi.BackgroundTransparency = 1
+counterLabelUi.Text = "SPEED COUNTER"
+counterLabelUi.Font = FONT
+counterLabelUi.TextSize = 15
+counterLabelUi.TextXAlignment = Enum.TextXAlignment.Left
+counterLabelUi.TextColor3 = TEXT
+counterLabelUi.ZIndex = 3
+counterLabelUi.Parent = counterRow
+
+local swTrack = Instance.new("Frame")
+swTrack.Name = "SwitchTrack"
+swTrack.AnchorPoint = Vector2.new(1, 0.5)
+swTrack.Size = UDim2.fromOffset(44, 18)
+swTrack.Position = UDim2.new(1, -10, 0.5, 0)
+swTrack.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+swTrack.BorderSizePixel = 0
+swTrack.ZIndex = 3
+swTrack.Parent = counterRow
+round(swTrack, 9)
+edgeStroke(swTrack, Color3.fromRGB(8, 8, 10), 1, 0.1)
+
+local swKnob = Instance.new("Frame")
+swKnob.Name = "SwitchKnob"
+swKnob.Size = UDim2.fromOffset(16, 16)
+swKnob.Position = UDim2.new(0, 1, 0.5, -8)
+swKnob.BackgroundColor3 = Color3.fromRGB(70, 70, 76)
+swKnob.BorderSizePixel = 0
+swKnob.ZIndex = 4
+swKnob.Parent = swTrack
+round(swKnob, 8)
+
+local counterButton = Instance.new("TextButton")
+counterButton.Size = UDim2.fromScale(1, 1)
+counterButton.BackgroundTransparency = 1
+counterButton.Text = ""
+counterButton.AutoButtonColor = false
+counterButton.ZIndex = 6
+counterButton.Parent = counterRow
+
+local function makeFlatButton(name: string, labelText: string, y: number, parent: Instance, onClick: () -> ())
 	local btn = Instance.new("TextButton")
 	btn.Name = name .. "Button"
 	btn.Size = UDim2.new(1, -20, 0, 32)
@@ -1373,7 +1452,7 @@ local function makeFlatButton(name: string, labelText: string, y: number, onClic
 	btn.TextColor3 = TEXT
 	btn.AutoButtonColor = false
 	btn.ZIndex = 2
-	btn.Parent = panel
+	btn.Parent = parent
 	round(btn, 6)
 	edgeStroke(btn, Color3.fromRGB(62, 62, 70), 1, 0.25)
 	local sc = Instance.new("UIScale")
@@ -1392,7 +1471,9 @@ local function makeFlatButton(name: string, labelText: string, y: number, onClic
 	return btn
 end
 
-makeFlatButton("InstantReset", "INSTANT RESET", 358, instantReset)
+makeFlatButton("InstantReset", "INSTANT RESET", 76, playerTab, instantReset)
+
+setTab(1)
 
 local stealBar = Instance.new("Frame")
 stealBar.Name = "StealBar"

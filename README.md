@@ -11,6 +11,13 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
 
 ## Panel
 
+The panel is a small hub: a title bar up top (redstone dust + `DELY BOOSTER TEST 67`)
+and three tabs below it that swap the content pane with a little pop animation:
+
+- **MOVE** - Normal Speed, Carry Speed, Enable (lever), Inf Jump.
+- **AUTO** - Auto Left / Auto Right buttons, Auto Grab.
+- **PLAYER** - Anti Die, Speed Counter, Instant Reset.
+
 - **Normal Speed box** - speed used when you're not carrying anything.
 - **Carry Speed box** - speed used while carrying a brainrot.
 - Both clamped to 0–1000; type a number and press Enter.
