@@ -73,6 +73,8 @@ local carrySpeed = DEFAULT_CARRY_SPEED
 local carrying = false
 local antiDie = false
 local infJump = false
+local antiAfk = false
+local fpsUnlock = false
 
 local character: Model? = nil
 local humanoid: Humanoid? = nil
@@ -121,6 +123,8 @@ local function saveConfig()
 		antiDie = antiDie,
 		infJump = infJump,
 		discordEnabled = discordEnabled,
+		antiAfk = antiAfk,
+		fpsUnlock = fpsUnlock,
 		guiPos = savedGuiPos,
 	}
 	pcall(function()
@@ -902,6 +906,57 @@ local function setDiscordTag(on: boolean)
 	saveConfig()
 end
 
+local setAntiAfkVisual: ((boolean) -> ())? = nil
+local setFpsUnlockVisual: ((boolean) -> ())? = nil
+
+do
+	local ok, virtualUser = pcall(function()
+		return game:GetService("VirtualUser")
+	end)
+	if ok and virtualUser then
+		player.Idled:Connect(function()
+			if not antiAfk then
+				return
+			end
+			pcall(function()
+				virtualUser:CaptureController()
+				virtualUser:ClickButton2(Vector2.new())
+			end)
+		end)
+	end
+end
+
+local function setAntiAfk(on: boolean)
+	antiAfk = on
+	if setAntiAfkVisual then
+		setAntiAfkVisual(on)
+	end
+	saveConfig()
+end
+
+local FPS_UNLOCKED = 240
+local FPS_CAPPED = 60
+
+local function setFpsUnlock(on: boolean)
+	fpsUnlock = on
+	if typeof(setfpscap) == "function" then
+		pcall(function()
+			setfpscap(on and FPS_UNLOCKED or FPS_CAPPED)
+		end)
+	end
+	if setFpsUnlockVisual then
+		setFpsUnlockVisual(on)
+	end
+	saveConfig()
+end
+
+local function rejoinServer()
+	local TeleportService = game:GetService("TeleportService")
+	pcall(function()
+		TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
+	end)
+end
+
 local function round(inst: GuiObject, radius: number)
 	local c = Instance.new("UICorner")
 	c.CornerRadius = UDim.new(0, radius)
@@ -1491,10 +1546,14 @@ setAntiDieVisual = makeSwitchRow("AntiDie", "ANTI DIE", 0, playerTab, function()
 	setAntiDie(not antiDie)
 end)
 
+setAntiAfkVisual = makeSwitchRow("AntiAfk", "ANTI AFK", 38, playerTab, function()
+	setAntiAfk(not antiAfk)
+end)
+
 local counterRow = Instance.new("Frame")
 counterRow.Name = "CounterRow"
 counterRow.Size = UDim2.new(1, -20, 0, 32)
-counterRow.Position = UDim2.fromOffset(10, 38)
+counterRow.Position = UDim2.fromOffset(10, 76)
 counterRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 counterRow.BorderSizePixel = 0
 counterRow.ZIndex = 2
@@ -1582,16 +1641,22 @@ local function makeFlatButton(name: string, labelText: string, y: number, parent
 	return btn
 end
 
-makeFlatButton("InstantReset", "INSTANT RESET", 76, playerTab, instantReset)
+makeFlatButton("InstantReset", "INSTANT RESET", 114, playerTab, instantReset)
 
-setDiscordVisual = makeSwitchRow("DiscordTag", "DISCORD TAG", 0, miscTab, function()
+setFpsUnlockVisual = makeSwitchRow("FpsUnlock", "FPS UNLOCK", 0, miscTab, function()
+	setFpsUnlock(not fpsUnlock)
+end)
+
+makeFlatButton("Rejoin", "REJOIN SERVER", 38, miscTab, rejoinServer)
+
+setDiscordVisual = makeSwitchRow("DiscordTag", "DISCORD TAG", 76, miscTab, function()
 	setDiscordTag(not discordEnabled)
 end)
 
 local creditLabel = Instance.new("TextLabel")
 creditLabel.Name = "Credit"
 creditLabel.Size = UDim2.new(1, -20, 0, 20)
-creditLabel.Position = UDim2.fromOffset(10, 44)
+creditLabel.Position = UDim2.fromOffset(10, 116)
 creditLabel.BackgroundTransparency = 1
 creditLabel.Text = DISCORD_TEXT
 creditLabel.Font = FONT
@@ -1966,6 +2031,8 @@ setCounterEnabled(false)
 setAntiDie(false)
 setInfJump(false)
 setDiscordTag(true)
+setAntiAfk(false)
+setFpsUnlock(false)
 
 local savedCfg = loadConfig()
 if savedCfg then
@@ -1975,6 +2042,8 @@ if savedCfg then
 	if savedCfg.antiDie ~= nil then setAntiDie(savedCfg.antiDie == true) end
 	if savedCfg.infJump ~= nil then setInfJump(savedCfg.infJump == true) end
 	if savedCfg.discordEnabled ~= nil then setDiscordTag(savedCfg.discordEnabled == true) end
+	if savedCfg.antiAfk ~= nil then setAntiAfk(savedCfg.antiAfk == true) end
+	if savedCfg.fpsUnlock ~= nil then setFpsUnlock(savedCfg.fpsUnlock == true) end
 	if savedCfg.enabled ~= nil then setEnabled(savedCfg.enabled == true) end
 	if type(savedCfg.guiPos) == "table" and #savedCfg.guiPos >= 4 then
 		savedGuiPos = savedCfg.guiPos

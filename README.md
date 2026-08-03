@@ -16,8 +16,8 @@ and three tabs below it that swap the content pane with a little pop animation:
 
 - **MOVE** - Normal Speed, Carry Speed, Enable (lever), Inf Jump.
 - **AUTO** - Auto Left / Auto Right buttons, Auto Grab.
-- **PLAYER** - Anti Die, Speed Counter, Instant Reset.
-- **MISC** - Discord Tag toggle (the `discord.gg/delhub` head tag) plus the link.
+- **PLAYER** - Anti Die, Anti AFK, Speed Counter, Instant Reset.
+- **MISC** - FPS Unlock, Rejoin Server, Discord Tag, and the link.
 
 - **Normal Speed box** - speed used when you're not carrying anything.
 - **Carry Speed box** - speed used while carrying a brainrot.
@@ -50,6 +50,13 @@ and three tabs below it that swap the content pane with a little pop animation:
 - **Instant Reset** - a flat full-width button that fires the game's `RE/...`
   reset remote (captured by hooking `FireServer`) with the reset GUID, spamming
   until you die. Executor-only.
+- **Anti AFK** - keeps you from getting kicked for idling. On `Player.Idled` it
+  nudges the camera through `VirtualUser`, same as the del hub anti-afk. Affects
+  only your own session.
+- **FPS Unlock** - raises your client frame-rate cap via `setfpscap` (executor
+  function) while on, back to 60 when off.
+- **Rejoin Server** - a flat button that teleports you back into the same server
+  instance (`TeleportService:TeleportToPlaceInstance`) for a clean reset.
 - **Speed Counter** - a Minecraft-style slide switch (stone track + redstone-block
   knob that lights up and slides right when on). Turns the head readout on/off,
   independent of the boost.
@@ -81,7 +88,8 @@ Settings persist across rejoins automatically (executor filesystem - needs
 `writefile`/`readfile`/`isfile`; silently no-ops without them). Whenever you
 change a value it writes `dely_booster_test67.json`, and on load it applies the
 saved **normal speed, carry speed, boost on/off, speed-counter on/off, anti-die
-on/off, inf-jump on/off, and panel position**. No save button - it just remembers.
+on/off, inf-jump on/off, anti-afk on/off, fps-unlock on/off, discord-tag on/off,
+and panel position**. No save button - it just remembers.
 
 The look uses `Enum.Font.Arcade` (the closest built-in to Minecraftia) with
 rounded corners (`UICorner`) throughout and soft edge strokes - light rims on
