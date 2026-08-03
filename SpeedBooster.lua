@@ -464,6 +464,208 @@ RunService.Heartbeat:Connect(function()
 	velocity.Enabled = true
 end)
 
+local grab = {
+	enabled = false,
+	radius = 55,
+	fireRange = 10,
+	holdMin = 1.3,
+	holdMax = 2.6,
+	entryDelay = 0.3,
+	data = {},
+	busy = false,
+	conn = nil,
+}
+
+local function grabIsMyPlot(plotName)
+	local plots = workspace:FindFirstChild("Plots")
+	if not plots then return false end
+	local plot = plots:FindFirstChild(plotName)
+	if not plot then return false end
+	local sign = plot:FindFirstChild("PlotSign")
+	if sign then
+		local yb = sign:FindFirstChild("YourBase")
+		if yb and yb:IsA("BillboardGui") then
+			return yb.Enabled == true
+		end
+	end
+	return false
+end
+
+local function grabRoot()
+	local char = player.Character
+	if not char then return nil end
+	return char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+end
+
+local function grabNearestPrompt()
+	local root = grabRoot()
+	if not root then return nil end
+	local plots = workspace:FindFirstChild("Plots")
+	if not plots then return nil end
+	local nearest, dist = nil, math.huge
+	for _, plot in ipairs(plots:GetChildren()) do
+		if plot:IsA("Model") and not grabIsMyPlot(plot.Name) then
+			local pods = plot:FindFirstChild("AnimalPodiums")
+			if pods then
+				for _, pod in ipairs(pods:GetChildren()) do
+					local base = pod:FindFirstChild("Base")
+					local sp = base and base:FindFirstChild("Spawn")
+					if sp then
+						local d = (sp.Position - root.Position).Magnitude
+						if d <= grab.radius and d < dist then
+							local found = nil
+							local att = sp:FindFirstChild("PromptAttachment")
+							if att then
+								for _, pr in ipairs(att:GetChildren()) do
+									if pr:IsA("ProximityPrompt") and pr.ActionText and pr.ActionText:find("Steal") then
+										found = pr
+									end
+								end
+							end
+							if not found then
+								for _, pr in ipairs(sp:GetDescendants()) do
+									if pr:IsA("ProximityPrompt") and pr.ActionText and pr.ActionText:find("Steal") then
+										found = pr
+									end
+								end
+							end
+							if found then
+								nearest, dist = found, d
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	return nearest
+end
+
+local function grabPromptDist(prompt)
+	local root = grabRoot()
+	if not root then return math.huge end
+	local part = prompt.Parent
+	if part and part:IsA("Attachment") then part = part.Parent end
+	if part and part:IsA("BasePart") then
+		return (part.Position - root.Position).Magnitude
+	end
+	return math.huge
+end
+
+local function grabExecute(prompt)
+	if grab.busy then return end
+	if not grab.data[prompt] then
+		grab.data[prompt] = { hold = {}, trigger = {}, ready = true }
+		if getconnections then
+			for _, c in ipairs(getconnections(prompt.PromptButtonHoldBegan)) do
+				if c.Function then table.insert(grab.data[prompt].hold, c.Function) end
+			end
+			for _, c in ipairs(getconnections(prompt.Triggered)) do
+				if c.Function then table.insert(grab.data[prompt].trigger, c.Function) end
+			end
+		end
+	end
+	local data = grab.data[prompt]
+	if not data.ready then return end
+	data.ready = false
+	grab.busy = true
+	local start = tick()
+	task.spawn(function()
+		for _, fn in ipairs(data.hold) do task.spawn(fn) end
+		task.wait(grab.holdMin)
+		local inRange = grabPromptDist(prompt) <= grab.fireRange
+		while true do
+			local el = tick() - start
+			if el > grab.holdMax or not prompt.Parent then break end
+			if grabPromptDist(prompt) <= grab.fireRange then
+				if not inRange then task.wait(grab.entryDelay) end
+				for _, fn in ipairs(data.trigger) do task.spawn(fn) end
+				break
+			end
+			task.wait()
+		end
+		task.wait(0.05)
+		data.ready = true
+		grab.busy = false
+	end)
+end
+
+local function startAutoGrab()
+	if grab.conn then return end
+	grab.conn = RunService.Heartbeat:Connect(function()
+		if not grab.enabled or grab.busy then return end
+		local p = grabNearestPrompt()
+		if p then grabExecute(p) end
+	end)
+end
+
+local function stopAutoGrab()
+	if grab.conn then grab.conn:Disconnect(); grab.conn = nil end
+	grab.busy = false
+end
+
+local resetRemote = nil
+local RESET_GUID = "f888ee6e-c86d-46e1-93d7-0639d6635d42"
+local resetDebounce = false
+
+pcall(function()
+	if hookfunction and newcclosure then
+		local oldFire
+		oldFire = hookfunction(Instance.new("RemoteEvent").FireServer, newcclosure(function(self, ...)
+			if not resetRemote and typeof(self) == "Instance" and self:IsA("RemoteEvent") and self.Name:sub(1, 3) == "RE/" then
+				resetRemote = self
+			end
+			return oldFire(self, ...)
+		end))
+	end
+end)
+
+local function findResetRemote()
+	if resetRemote then return resetRemote end
+	for _, desc in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
+		if desc:IsA("RemoteEvent") and desc.Name:sub(1, 3) == "RE/" then
+			resetRemote = desc
+			break
+		end
+	end
+	return resetRemote
+end
+
+local function instantReset()
+	if resetDebounce then return end
+	local remote = findResetRemote()
+	if not remote then return end
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum and hum.Health <= 0 then
+		pcall(function() remote:FireServer(RESET_GUID, player, "balloon") end)
+		return
+	end
+	resetDebounce = true
+	local detected = false
+	local conns = {}
+	if hum then
+		table.insert(conns, hum.Died:Connect(function() detected = true end))
+		table.insert(conns, hum:GetPropertyChangedSignal("Health"):Connect(function()
+			if hum.Health <= 0 then detected = true end
+		end))
+	end
+	if char then
+		table.insert(conns, char.AncestryChanged:Connect(function(_, parent)
+			if not parent then detected = true end
+		end))
+	end
+	task.spawn(function()
+		for _ = 1, 10 do
+			if detected then break end
+			pcall(function() remote:FireServer(RESET_GUID, player, "balloon") end)
+			task.wait(0.05)
+		end
+		for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+		task.delay(0.6, function() resetDebounce = false end)
+	end)
+end
+
 local function round(inst: GuiObject, radius: number)
 	local c = Instance.new("UICorner")
 	c.CornerRadius = UDim.new(0, radius)
@@ -571,7 +773,7 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
 local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
-local PANEL_W, PANEL_H = 250, 276
+local PANEL_W, PANEL_H = 250, 352
 local function computeScale(): number
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
@@ -818,7 +1020,7 @@ leverButton.Parent = toggleRow
 local counterRow = Instance.new("Frame")
 counterRow.Name = "CounterRow"
 counterRow.Size = UDim2.new(1, -20, 0, 32)
-counterRow.Position = UDim2.fromOffset(10, 236)
+counterRow.Position = UDim2.fromOffset(10, 274)
 counterRow.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
 counterRow.BorderSizePixel = 0
 counterRow.ZIndex = 2
@@ -951,6 +1153,68 @@ end)
 setAutoRightVisual = makeSwitchRow("AutoRight", "AUTO RIGHT", 198, function()
 	setAutoRight(not autoRightEnabled)
 end)
+
+local setAutoGrabVisual
+setAutoGrabVisual = makeSwitchRow("AutoGrab", "AUTO GRAB", 236, function()
+	grab.enabled = not grab.enabled
+	if grab.enabled then startAutoGrab() else stopAutoGrab() end
+	setAutoGrabVisual(grab.enabled)
+end)
+
+local function makeButtonRow(name: string, labelText: string, btnText: string, y: number, onClick: () -> ())
+	local row = Instance.new("Frame")
+	row.Name = name .. "Row"
+	row.Size = UDim2.new(1, -20, 0, 32)
+	row.Position = UDim2.fromOffset(10, y)
+	row.BackgroundColor3 = Color3.fromRGB(34, 34, 38)
+	row.BorderSizePixel = 0
+	row.ZIndex = 2
+	row.Parent = panel
+	round(row, 6)
+	edgeStroke(row, Color3.fromRGB(62, 62, 70), 1, 0.25)
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0.5, 0, 1, 0)
+	label.Position = UDim2.fromOffset(10, 0)
+	label.BackgroundTransparency = 1
+	label.Text = labelText
+	label.Font = FONT
+	label.TextSize = 15
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextColor3 = TEXT
+	label.ZIndex = 3
+	label.Parent = row
+
+	local btn = Instance.new("TextButton")
+	btn.AnchorPoint = Vector2.new(1, 0.5)
+	btn.Size = UDim2.fromOffset(84, 24)
+	btn.Position = UDim2.new(1, -10, 0.5, 0)
+	btn.BackgroundColor3 = REDDISH_BLACK
+	btn.Text = btnText
+	btn.Font = FONT
+	btn.TextSize = 13
+	btn.TextColor3 = Color3.fromRGB(235, 235, 235)
+	btn.AutoButtonColor = false
+	btn.ZIndex = 4
+	btn.Parent = row
+	round(btn, 5)
+	edgeStroke(btn, RED_MID, 1, 0.3)
+	local sc = Instance.new("UIScale")
+	sc.Parent = btn
+
+	btn.MouseEnter:Connect(function()
+		TweenService:Create(btn, TweenInfo.new(0.1), { BackgroundColor3 = CRIMSON }):Play()
+	end)
+	btn.MouseLeave:Connect(function()
+		TweenService:Create(btn, TweenInfo.new(0.1), { BackgroundColor3 = REDDISH_BLACK }):Play()
+	end)
+	btn.Activated:Connect(function()
+		punch(sc, 0.85)
+		onClick()
+	end)
+end
+
+makeButtonRow("InstantReset", "INSTANT RESET", "RESET", 312, instantReset)
 
 do
 	local dragging, dragStart, startPos = false, nil, nil

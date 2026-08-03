@@ -21,6 +21,13 @@ Put `SpeedBooster.lua` in **StarterPlayer > StarterPlayerScripts** as a `LocalSc
   `LinearVelocity` plane mover as the boost instead of writing
   `AssemblyLinearVelocity`, so they don't trip the same detection. Only one runs
   at a time.
+- **Auto Grab** - half-autograb steal loop. Finds the nearest "Steal" prompt on
+  another base within reach, grabs the prompt's own hold/trigger connections
+  (`getconnections`) and fires them, so the steal goes through the game's normal
+  path. Executor-only.
+- **Instant Reset** - a RESET button that fires the game's `RE/...` reset remote
+  (captured by hooking `FireServer`) with the reset GUID, spamming until you die.
+  Rebindable in the original; here it's the button. Executor-only.
 - **Speed Counter** - a Minecraft-style slide switch (stone track + redstone-block
   knob that lights up and slides right when on). Turns the head readout on/off,
   independent of the boost.
