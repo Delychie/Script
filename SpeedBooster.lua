@@ -9,7 +9,7 @@ local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local CLICK_OFFSET = 0.4
+local CLICK_OFFSET = 0.75
 local clickSound = Instance.new("Sound")
 clickSound.SoundId = "rbxassetid://88073348503000"
 clickSound.Volume = 1
@@ -1845,14 +1845,6 @@ do
 			moved = false
 			dragStart = input.Position
 			startPos = toggleBtn.Position
-			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then
-					dragging = false
-					if not moved then
-						setPanelVisible(not panelVisible)
-					end
-				end
-			end)
 		end
 	end)
 	UserInputService.InputChanged:Connect(function(input)
@@ -1865,6 +1857,17 @@ do
 			toggleBtn.Position = UDim2.new(
 				startPos.X.Scale, startPos.X.Offset + delta.X,
 				startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+	toggleBtn.Activated:Connect(function()
+		if not moved then
+			setPanelVisible(not panelVisible)
 		end
 	end)
 end
