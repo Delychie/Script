@@ -1108,12 +1108,27 @@ local function panelPop(from: number)
 	}):Play()
 end
 
+local function clampPanel()
+	local cam = workspace.CurrentCamera
+	local vp = (cam and cam.ViewportSize) or Vector2.new(1280, 720)
+	local size = Vector2.new(PANEL_W, PANEL_H) * deviceScale
+	local ax, ay = panel.AnchorPoint.X, panel.AnchorPoint.Y
+	local anchorX = panel.Position.X.Scale * vp.X + panel.Position.X.Offset
+	local anchorY = panel.Position.Y.Scale * vp.Y + panel.Position.Y.Offset
+	local left = anchorX - size.X * ax
+	local top = anchorY - size.Y * ay
+	left = math.clamp(left, 8, math.max(8, vp.X - size.X - 8))
+	top = math.clamp(top, 8, math.max(8, vp.Y - size.Y - 8))
+	panel.Position = UDim2.fromOffset(left + size.X * ax, top + size.Y * ay)
+end
+
 do
 	local cam = workspace.CurrentCamera
 	if cam then
 		cam:GetPropertyChangedSignal("ViewportSize"):Connect(function()
 			deviceScale = computeScale()
 			panelScale.Scale = deviceScale
+			clampPanel()
 		end)
 	end
 end
@@ -1822,6 +1837,7 @@ local function setPanelVisible(v: boolean)
 	panelVisible = v
 	punch(toggleScale, 0.85)
 	if v then
+		clampPanel()
 		panel.Visible = true
 		panelPop(0.7)
 	else
@@ -2058,6 +2074,7 @@ if savedCfg then
 end
 suppressSave = false
 
+clampPanel()
 panelPop(0.8)
 task.delay(0.12, function()
 	shake(dust, 16, 0.6)
