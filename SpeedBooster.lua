@@ -42,11 +42,7 @@ local DUST_IMAGE = "rbxassetid://83833754384535"
 
 local CARRY_WALKSPEED_MAX = 25
 
-local STONE_TOP   = Color3.fromRGB(46, 46, 50)
-local STONE_BOT   = Color3.fromRGB(24, 24, 26)
 local SLOT        = Color3.fromRGB(18, 18, 20)
-local BEVEL_HI    = Color3.fromRGB(78, 78, 84)
-local BEVEL_LO    = Color3.fromRGB(10, 10, 12)
 local REDDISH_BLACK = Color3.fromRGB(40, 7, 7)
 local CRIMSON       = Color3.fromRGB(178, 20, 48)
 local RED           = Color3.fromRGB(235, 22, 22)
@@ -1192,11 +1188,9 @@ local tabContents = { moveTab, autoTab, playerTab, miscTab }
 local tabScales = { moveScale, autoScale, playerScale, miscScale }
 local tabDefs = { "MOVE", "AUTO", "PLAYER", "MISC" }
 local tabButtons: { TextButton } = {}
-local activeTab = 1
 local TAB_COUNT = #tabDefs
 
 local function setTab(index: number)
-	activeTab = index
 	for i, content in ipairs(tabContents) do
 		content.Visible = (i == index)
 	end
@@ -1668,6 +1662,7 @@ creditLabel.Parent = miscTab
 
 setTab(1)
 
+do
 local stealBar = Instance.new("Frame")
 stealBar.Name = "StealBar"
 stealBar.AnchorPoint = Vector2.new(0.5, 1)
@@ -1784,7 +1779,9 @@ do
 		end
 	end)
 end
+end
 
+do
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Name = "ToggleButton"
 toggleBtn.AnchorPoint = Vector2.new(0.5, 0)
@@ -1870,6 +1867,7 @@ do
 				startPos.Y.Scale, startPos.Y.Offset + delta.Y)
 		end
 	end)
+end
 end
 
 do
