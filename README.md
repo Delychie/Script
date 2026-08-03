@@ -17,6 +17,7 @@ and three tabs below it that swap the content pane with a little pop animation:
 - **MOVE** - Normal Speed, Carry Speed, Enable (lever), Inf Jump.
 - **AUTO** - Auto Left / Auto Right buttons, Auto Grab.
 - **PLAYER** - Anti Die, Speed Counter, Instant Reset.
+- **MISC** - Discord Tag toggle (the `discord.gg/delhub` head tag) plus the link.
 
 - **Normal Speed box** - speed used when you're not carrying anything.
 - **Carry Speed box** - speed used while carrying a brainrot.
@@ -128,6 +129,16 @@ brainrot:
   `getNormalSpeed()` and `getCarrySpeed()`, and lights the active speed row's
   label. No input from you is needed - walk into a steal and it switches, drop
   it and it switches back.
+
+## Discord tag (head)
+
+The **Discord Tag** toggle (MISC tab, on by default) puts a `discord.gg/delhub`
+`BillboardGui` above your head. It uses the same overlay scan as the speed
+counter but with top priority: it parks itself above every other head tag
+(nametags **and** the speed counter), so it always sits on top. The counter's
+own scan ignores the discord tag, which keeps the stack stable (nametags <
+speed counter < discord tag) instead of the two leapfrogging each other. It's
+client-side, so only you see it. The setting persists across rejoins.
 
 ## Head counter (Speed Counter toggle)
 

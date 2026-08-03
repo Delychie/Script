@@ -86,6 +86,12 @@ local jumpVelocity: LinearVelocity? = nil
 local counterGui: BillboardGui? = nil
 local counterLabel: TextLabel? = nil
 
+local discordGui: BillboardGui? = nil
+local discordEnabled = true
+local discordScanT = 0
+local DISCORD_BASE_Y = 2.6
+local DISCORD_TEXT = "discord.gg/delhub"
+
 local counterEnabled = false
 local prevSpeed = 0
 local speedAnimActive = false
@@ -114,6 +120,7 @@ local function saveConfig()
 		counterEnabled = counterEnabled,
 		antiDie = antiDie,
 		infJump = infJump,
+		discordEnabled = discordEnabled,
 		guiPos = savedGuiPos,
 	}
 	pcall(function()
@@ -249,6 +256,72 @@ local function buildCounter()
 	counterLabel = label
 end
 
+local function teardownDiscord()
+	if discordGui then
+		discordGui:Destroy()
+		discordGui = nil
+	end
+end
+
+local function buildDiscord()
+	teardownDiscord()
+	if not head then
+		return
+	end
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "DelDiscordTag"
+	billboard.Adornee = head
+	billboard.Size = UDim2.fromOffset(172, 30)
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, DISCORD_BASE_Y, 0)
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = 200
+	billboard.Enabled = discordEnabled
+	billboard.Parent = head
+
+	local plate = Instance.new("Frame")
+	plate.Name = "Plate"
+	plate.AnchorPoint = Vector2.new(0.5, 0.5)
+	plate.Size = UDim2.fromScale(0.94, 0.82)
+	plate.Position = UDim2.fromScale(0.5, 0.5)
+	plate.BackgroundColor3 = Color3.fromRGB(12, 12, 14)
+	plate.BackgroundTransparency = 0.3
+	plate.BorderSizePixel = 0
+	plate.ZIndex = 1
+	plate.Parent = billboard
+	local plateCorner = Instance.new("UICorner")
+	plateCorner.CornerRadius = UDim.new(0, 6)
+	plateCorner.Parent = plate
+	local plateStroke = Instance.new("UIStroke")
+	plateStroke.Color = RED_MID
+	plateStroke.Thickness = 1.5
+	plateStroke.Transparency = 0.1
+	plateStroke.Parent = plate
+	local plateGrad = Instance.new("UIGradient")
+	plateGrad.Rotation = 90
+	plateGrad.Color = ColorSequence.new(Color3.fromRGB(24, 8, 8), Color3.fromRGB(10, 10, 12))
+	plateGrad.Parent = plate
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Tag"
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = DISCORD_TEXT
+	label.Font = FONT
+	label.TextScaled = true
+	label.TextColor3 = Color3.fromRGB(255, 90, 90)
+	label.TextStrokeTransparency = 0.3
+	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	label.ZIndex = 2
+	label.Parent = billboard
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, 8)
+	pad.PaddingRight = UDim.new(0, 8)
+	pad.Parent = label
+
+	discordGui = billboard
+end
+
 local onCharacterReady: (() -> ())? = nil
 
 local function onCharacterAdded(newCharacter: Model)
@@ -258,6 +331,7 @@ local function onCharacterAdded(newCharacter: Model)
 	head = newCharacter:WaitForChild("Head") :: BasePart
 	buildMover()
 	buildCounter()
+	buildDiscord()
 	if onCharacterReady then
 		onCharacterReady()
 	end
@@ -382,14 +456,14 @@ local function triggerSpeedFlash(big: boolean)
 	end)
 end
 
-local function otherHeadTopY(): number
-	local top = COUNTER_BASE_Y
+local function highestTagTop(base: number, skipA: Instance?, skipB: Instance?): number
+	local top = base
 	local c = character
 	if not c then
 		return top
 	end
 	for _, d in ipairs(c:GetDescendants()) do
-		if d ~= counterGui and d:IsA("BillboardGui") and d.Enabled then
+		if d ~= skipA and d ~= skipB and d:IsA("BillboardGui") and d.Enabled then
 			local y = math.max(d.StudsOffsetWorldSpace.Y, d.StudsOffset.Y) + 1.0
 			if y > top then
 				top = y
@@ -397,6 +471,27 @@ local function otherHeadTopY(): number
 		end
 	end
 	return top
+end
+
+local function updateDiscord()
+	local billboard = discordGui
+	if not billboard or not billboard.Parent then
+		return
+	end
+	if not discordEnabled then
+		billboard.Enabled = false
+		return
+	end
+	billboard.Enabled = true
+
+	local now = tick()
+	if now - discordScanT > 0.35 then
+		discordScanT = now
+		local y = highestTagTop(DISCORD_BASE_Y, billboard)
+		if math.abs(billboard.StudsOffsetWorldSpace.Y - y) > 0.05 then
+			billboard.StudsOffsetWorldSpace = Vector3.new(0, y, 0)
+		end
+	end
 end
 
 local function updateCounter()
@@ -430,9 +525,9 @@ local function updateCounter()
 	local now = tick()
 	if now - counterScanT > 0.35 then
 		counterScanT = now
-		local target = Vector3.new(0, otherHeadTopY(), 0)
-		if math.abs(billboard.StudsOffsetWorldSpace.Y - target.Y) > 0.05 then
-			billboard.StudsOffsetWorldSpace = target
+		local y = highestTagTop(COUNTER_BASE_Y, billboard, discordGui)
+		if math.abs(billboard.StudsOffsetWorldSpace.Y - y) > 0.05 then
+			billboard.StudsOffsetWorldSpace = Vector3.new(0, y, 0)
 		end
 	end
 end
@@ -448,6 +543,7 @@ RunService.Heartbeat:Connect(function()
 	end
 
 	updateCounter()
+	updateDiscord()
 
 	local velocity = linearVelocity
 	if not velocity or not velocity.Parent then
@@ -793,6 +889,19 @@ local function setInfJump(on: boolean)
 	saveConfig()
 end
 
+local setDiscordVisual: ((boolean) -> ())? = nil
+
+local function setDiscordTag(on: boolean)
+	discordEnabled = on
+	if discordGui then
+		discordGui.Enabled = on
+	end
+	if setDiscordVisual then
+		setDiscordVisual(on)
+	end
+	saveConfig()
+end
+
 local function round(inst: GuiObject, radius: number)
 	local c = Instance.new("UICorner")
 	c.CornerRadius = UDim.new(0, radius)
@@ -1022,12 +1131,14 @@ end
 local moveTab, moveScale = makeTab()
 local autoTab, autoScale = makeTab()
 local playerTab, playerScale = makeTab()
+local miscTab, miscScale = makeTab()
 
-local tabContents = { moveTab, autoTab, playerTab }
-local tabScales = { moveScale, autoScale, playerScale }
-local tabDefs = { "MOVE", "AUTO", "PLAYER" }
+local tabContents = { moveTab, autoTab, playerTab, miscTab }
+local tabScales = { moveScale, autoScale, playerScale, miscScale }
+local tabDefs = { "MOVE", "AUTO", "PLAYER", "MISC" }
 local tabButtons: { TextButton } = {}
 local activeTab = 1
+local TAB_COUNT = #tabDefs
 
 local function setTab(index: number)
 	activeTab = index
@@ -1047,12 +1158,12 @@ end
 for i, name in ipairs(tabDefs) do
 	local btn = Instance.new("TextButton")
 	btn.Name = name .. "Tab"
-	btn.Size = UDim2.new(1 / 3, -4, 1, 0)
-	btn.Position = UDim2.new((i - 1) / 3, 2, 0, 0)
+	btn.Size = UDim2.new(1 / TAB_COUNT, -3, 1, 0)
+	btn.Position = UDim2.new((i - 1) / TAB_COUNT, 1.5, 0, 0)
 	btn.BackgroundColor3 = Color3.fromRGB(30, 30, 34)
 	btn.Text = name
 	btn.Font = FONT
-	btn.TextSize = 14
+	btn.TextSize = 13
 	btn.TextColor3 = SUBTEXT
 	btn.AutoButtonColor = false
 	btn.ZIndex = 3
@@ -1473,6 +1584,23 @@ end
 
 makeFlatButton("InstantReset", "INSTANT RESET", 76, playerTab, instantReset)
 
+setDiscordVisual = makeSwitchRow("DiscordTag", "DISCORD TAG", 0, miscTab, function()
+	setDiscordTag(not discordEnabled)
+end)
+
+local creditLabel = Instance.new("TextLabel")
+creditLabel.Name = "Credit"
+creditLabel.Size = UDim2.new(1, -20, 0, 20)
+creditLabel.Position = UDim2.fromOffset(10, 44)
+creditLabel.BackgroundTransparency = 1
+creditLabel.Text = DISCORD_TEXT
+creditLabel.Font = FONT
+creditLabel.TextSize = 14
+creditLabel.TextXAlignment = Enum.TextXAlignment.Center
+creditLabel.TextColor3 = SUBTEXT
+creditLabel.ZIndex = 3
+creditLabel.Parent = miscTab
+
 setTab(1)
 
 local stealBar = Instance.new("Frame")
@@ -1837,6 +1965,7 @@ setEnabled(false)
 setCounterEnabled(false)
 setAntiDie(false)
 setInfJump(false)
+setDiscordTag(true)
 
 local savedCfg = loadConfig()
 if savedCfg then
@@ -1845,6 +1974,7 @@ if savedCfg then
 	if savedCfg.counterEnabled ~= nil then setCounterEnabled(savedCfg.counterEnabled == true) end
 	if savedCfg.antiDie ~= nil then setAntiDie(savedCfg.antiDie == true) end
 	if savedCfg.infJump ~= nil then setInfJump(savedCfg.infJump == true) end
+	if savedCfg.discordEnabled ~= nil then setDiscordTag(savedCfg.discordEnabled == true) end
 	if savedCfg.enabled ~= nil then setEnabled(savedCfg.enabled == true) end
 	if type(savedCfg.guiPos) == "table" and #savedCfg.guiPos >= 4 then
 		savedGuiPos = savedCfg.guiPos
