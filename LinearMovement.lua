@@ -11,17 +11,24 @@ local JUMP_VELOCITY = 48   -- upward launch speed
 local JUMP_HOLD = 0.04     -- how long the launch is held before gravity takes over
 local AIR_CONTROL = true   -- allow steering while airborne
 
-local character: Model? = nil
+local STEP_ASSIST = true   -- glide up small ledges/stairs instead of getting stuck
+local STEP_HEIGHT = 3      -- tallest ledge that counts as a step (studs)
+local STEP_PROBE = 1.6     -- how far ahead to look for a step (studs)
+local STEP_UP_SPEED = 14   -- how fast you rise over a step
+
 local humanoid: Humanoid? = nil
 local rootPart: BasePart? = nil
 local attachment: Attachment? = nil
 local moveLV: LinearVelocity? = nil
 local jumpLV: LinearVelocity? = nil
+local stepLV: LinearVelocity? = nil
 local jumpDebounce = false
+local rayParams: RaycastParams? = nil
 
 local function teardown()
 	if moveLV then moveLV:Destroy() moveLV = nil end
 	if jumpLV then jumpLV:Destroy() jumpLV = nil end
+	if stepLV then stepLV:Destroy() stepLV = nil end
 	if attachment then attachment:Destroy() attachment = nil end
 end
 
@@ -58,13 +65,24 @@ local function build()
 	jump.Enabled = false
 	jump.Parent = rootPart
 
+	local step = Instance.new("LinearVelocity")
+	step.Name = "LinearStep"
+	step.Attachment0 = att
+	step.RelativeTo = Enum.ActuatorRelativeTo.World
+	step.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
+	step.LineDirection = Vector3.new(0, 1, 0)
+	step.MaxForce = math.huge
+	step.LineVelocity = 0
+	step.Enabled = false
+	step.Parent = rootPart
+
 	attachment = att
 	moveLV = move
 	jumpLV = jump
+	stepLV = step
 end
 
 local function onCharacterAdded(newCharacter: Model)
-	character = newCharacter
 	humanoid = newCharacter:WaitForChild("Humanoid") :: Humanoid
 	rootPart = newCharacter:WaitForChild("HumanoidRootPart") :: BasePart
 	build()
@@ -72,6 +90,52 @@ local function onCharacterAdded(newCharacter: Model)
 	pcall(function() humanoid.JumpPower = 0 end)
 	pcall(function() humanoid.JumpHeight = 0 end)
 	humanoid.AutoRotate = true
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { newCharacter }
+	params.IgnoreWater = true
+	rayParams = params
+end
+
+local function groundY(): number?
+	local hrp = rootPart
+	local hum = humanoid
+	if not hrp or not hum or not rayParams then
+		return nil
+	end
+	local reach = hrp.Size.Y / 2 + hum.HipHeight + 2.5
+	local hit = workspace:Raycast(hrp.Position, Vector3.new(0, -reach, 0), rayParams)
+	return hit and hit.Position.Y or nil
+end
+
+local function needsStep(dir: Vector3): boolean
+	if not STEP_ASSIST then
+		return false
+	end
+	local hrp = rootPart
+	if not hrp or not rayParams then
+		return false
+	end
+	local flat = Vector3.new(dir.X, 0, dir.Z)
+	if flat.Magnitude < 0.01 then
+		return false
+	end
+	flat = flat.Unit
+	local gy = groundY()
+	if not gy then
+		return false
+	end
+	local low = workspace:Raycast(
+		Vector3.new(hrp.Position.X, gy + 0.25, hrp.Position.Z),
+		flat * STEP_PROBE, rayParams)
+	if not low then
+		return false
+	end
+	local high = workspace:Raycast(
+		Vector3.new(hrp.Position.X, gy + STEP_HEIGHT + 0.1, hrp.Position.Z),
+		flat * STEP_PROBE, rayParams)
+	return high == nil
 end
 
 local function stateBlocksMovement(): boolean
@@ -136,15 +200,24 @@ RunService.Heartbeat:Connect(function()
 		hum.WalkSpeed = 0
 	end
 
+	local function clearStep()
+		if stepLV and stepLV.Parent then
+			stepLV.Enabled = false
+			stepLV.LineVelocity = 0
+		end
+	end
+
 	if hum.Health <= 0 or stateBlocksMovement() then
 		move.Enabled = false
 		move.PlaneVelocity = Vector2.zero
+		clearStep()
 		return
 	end
 
 	if not AIR_CONTROL and not isGrounded() then
 		move.Enabled = false
 		move.PlaneVelocity = Vector2.zero
+		clearStep()
 		return
 	end
 
@@ -155,6 +228,16 @@ RunService.Heartbeat:Connect(function()
 	else
 		move.PlaneVelocity = Vector2.zero
 		move.Enabled = false
+	end
+
+	local jumping = jumpLV ~= nil and jumpLV.Enabled
+	if move.Enabled and not jumping and needsStep(dir) then
+		if stepLV and stepLV.Parent then
+			stepLV.LineVelocity = STEP_UP_SPEED
+			stepLV.Enabled = true
+		end
+	else
+		clearStep()
 	end
 end)
 
