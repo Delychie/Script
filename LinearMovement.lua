@@ -6,12 +6,13 @@ local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 
-local WALK_SPEED = 16       -- horizontal speed in studs/s (16 = vanilla)
-local JUMP_VELOCITY = 48    -- upward launch speed
-local JUMP_HOLD = 0.04      -- how long the launch is held before gravity takes over
-local JUMP_COOLDOWN = 0.18  -- minimum time between jumps
+local WALK_SPEED = 16       -- horizontal speed in studs/s (16 = vanilla; raise for fast movement)
+local JUMP_POWER = 50       -- jump strength (native jump, so the mobile jump button stays visible)
 local AIR_CONTROL = true    -- allow steering while airborne
-local MOVE_FORCE = 25000    -- movement authority; raise for snappier/heavier control, lower to let knockback/explosions shove you
+-- MOVE_FORCE stays huge on purpose: at WalkSpeed 0 the Humanoid runs its own "stop" controller,
+-- and only an overwhelming force lets the constraint actually reach high speeds. A side effect is
+-- that horizontal knockback is resisted while you hold a direction.
+local MOVE_FORCE = math.huge
 
 local STEP_ASSIST = true    -- glide up small ledges/stairs instead of getting stuck
 local STEP_HEIGHT = 3       -- tallest ledge that counts as a step (studs)
@@ -24,16 +25,15 @@ local humanoid: Humanoid? = nil
 local rootPart: BasePart? = nil
 local attachment: Attachment? = nil
 local moveLV: LinearVelocity? = nil
-local jumpLV: LinearVelocity? = nil
 local stepLV: LinearVelocity? = nil
 local runTrack: AnimationTrack? = nil
 local rayParams: RaycastParams? = nil
 
 local footOffset = 3        -- HRP-centre to sole distance (recomputed per character / rig)
-local jumpDebounce = false
 local stepping = false
 local stepTargetY = 0
 local stepDeadline = 0
+local jumpSuppressUntil = 0 -- brief window after a jump press where step-assist stays off
 local airFloorVX, airFloorVZ = 0, 0 -- platform velocity retained through a jump
 
 local connections: { RBXScriptConnection } = {}
@@ -41,7 +41,6 @@ local alive = true
 
 local function teardown()
 	if moveLV then moveLV:Destroy() moveLV = nil end
-	if jumpLV then jumpLV:Destroy() jumpLV = nil end
 	if stepLV then stepLV:Destroy() stepLV = nil end
 	if attachment then attachment:Destroy() attachment = nil end
 end
@@ -57,19 +56,6 @@ local function purgeOld(part: BasePart)
 			c:Destroy()
 		end
 	end
-end
-
-local function newLine(att: Attachment, name: string): LinearVelocity
-	local lv = Instance.new("LinearVelocity")
-	lv.Name = name
-	lv.Attachment0 = att
-	lv.RelativeTo = Enum.ActuatorRelativeTo.World
-	lv.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
-	lv.LineDirection = Vector3.new(0, 1, 0)
-	lv.MaxForce = math.huge
-	lv.LineVelocity = 0
-	lv.Enabled = false
-	return lv
 end
 
 local function build()
@@ -95,14 +81,19 @@ local function build()
 	move.Enabled = false
 	move.Parent = rootPart
 
-	local jump = newLine(att, "LinearJump")
-	jump.Parent = rootPart
-	local step = newLine(att, "LinearStep")
+	local step = Instance.new("LinearVelocity")
+	step.Name = "LinearStep"
+	step.Attachment0 = att
+	step.RelativeTo = Enum.ActuatorRelativeTo.World
+	step.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
+	step.LineDirection = Vector3.new(0, 1, 0)
+	step.MaxForce = math.huge
+	step.LineVelocity = 0
+	step.Enabled = false
 	step.Parent = rootPart
 
 	attachment = att
 	moveLV = move
-	jumpLV = jump
 	stepLV = step
 end
 
@@ -198,9 +189,9 @@ local function onCharacterAdded(char: Model)
 	rootPart = hrp
 	footOffset = computeFootOffset(char, hum, hrp)
 	build()
-	hum.WalkSpeed = 0
-	hum.JumpPower = 0
-	hum.JumpHeight = 0
+	hum.WalkSpeed = 0        -- the constraint owns horizontal movement
+	hum.UseJumpPower = true  -- keep native jumping (and the mobile jump button) working
+	hum.JumpPower = JUMP_POWER
 	hum.AutoRotate = true
 
 	local params = RaycastParams.new()
@@ -209,8 +200,8 @@ local function onCharacterAdded(char: Model)
 	params.IgnoreWater = true
 	rayParams = params
 
-	jumpDebounce = false
 	stepping = false
+	jumpSuppressUntil = 0
 	airFloorVX, airFloorVZ = 0, 0
 	setupAnim(char)
 end
@@ -292,44 +283,14 @@ local function disableAll()
 		moveLV.Enabled = false
 		moveLV.PlaneVelocity = Vector2.zero
 	end
-	if jumpLV and jumpLV.Parent then
-		jumpLV.Enabled = false
-		jumpLV.LineVelocity = 0
-	end
 	stopStep()
 end
 
-local function isGroundedNow(): boolean
-	local topY = groundInfo()
-	local fy = feetY()
-	return topY ~= nil and fy ~= nil and (fy - topY) <= GROUND_TOLERANCE
-end
-
-local function doJump()
-	local jump = jumpLV
-	local hum = humanoid
-	if jumpDebounce or not jump or not jump.Parent or not hum then
-		return
-	end
-	if hum.Health <= 0 or stateBlocksMovement() or not isGroundedNow() then
-		return
-	end
-	stopStep() -- never let jump and step drive the Y axis in the same frame
-	jumpDebounce = true
-	jump.LineVelocity = JUMP_VELOCITY
-	jump.Enabled = true
-	task.delay(JUMP_HOLD, function()
-		if jumpLV == jump and jump.Parent then
-			jump.Enabled = false
-			jump.LineVelocity = 0
-		end
-	end)
-	task.delay(JUMP_COOLDOWN, function()
-		jumpDebounce = false
-	end)
-end
-
-table.insert(connections, UserInputService.JumpRequest:Connect(doJump))
+-- a jump press stops any active step lift and keeps it off briefly so the jump arc is clean
+table.insert(connections, UserInputService.JumpRequest:Connect(function()
+	jumpSuppressUntil = tick() + 0.3
+	stopStep()
+end))
 
 table.insert(connections, RunService.Heartbeat:Connect(function()
 	local move = moveLV
@@ -340,8 +301,8 @@ table.insert(connections, RunService.Heartbeat:Connect(function()
 	end
 
 	if hum.WalkSpeed ~= 0 then hum.WalkSpeed = 0 end
-	if hum.JumpPower ~= 0 then hum.JumpPower = 0 end
-	if hum.JumpHeight ~= 0 then hum.JumpHeight = 0 end
+	if hum.JumpPower ~= JUMP_POWER then hum.JumpPower = JUMP_POWER end
+	if not hum.UseJumpPower then hum.UseJumpPower = true end
 	if not hum.AutoRotate then hum.AutoRotate = true end
 
 	if hum.Health <= 0 or stateBlocksMovement() then
@@ -359,8 +320,7 @@ table.insert(connections, RunService.Heartbeat:Connect(function()
 	local flat = moving and Vector3.new(dir.X, 0, dir.Z).Unit or Vector3.zero
 
 	-- step assist (decided first so the movement branch can keep pushing forward through a step)
-	local jumping = jumpLV ~= nil and jumpLV.Enabled
-	if not STEP_ASSIST or jumping or not moving then
+	if not STEP_ASSIST or tick() < jumpSuppressUntil or not moving then
 		stopStep()
 	elseif stepping then
 		local nowFy = feetY()
@@ -428,8 +388,6 @@ local function cleanup()
 	if hum then
 		pcall(function()
 			hum.WalkSpeed = 16
-			hum.JumpPower = 50
-			hum.JumpHeight = 7.2
 			hum.AutoRotate = true
 		end)
 	end
