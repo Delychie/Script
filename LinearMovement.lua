@@ -1,40 +1,44 @@
 --!nonstrict
 
+-- LinearMovement: boosts your movement through a LinearVelocity constraint layered
+-- ON TOP of normal humanoid movement. Native walking still handles animation, jumping,
+-- slopes, stairs, rooting and the game's own WalkSpeed (e.g. carry slow-downs); the
+-- constraint only kicks in when your effective speed is above the game's, and drives
+-- the extra speed. When you are not boosting it does nothing, so movement stays vanilla.
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 
-local WALK_SPEED = 16       -- horizontal speed in studs/s (16 = vanilla; raise for fast movement)
-local JUMP_POWER = 50       -- jump strength (native jump, so the mobile jump button stays visible)
-local AIR_CONTROL = true    -- allow steering while airborne
--- MOVE_FORCE stays huge on purpose: at WalkSpeed 0 the Humanoid runs its own "stop" controller,
--- and only an overwhelming force lets the constraint actually reach high speeds. A side effect is
--- that horizontal knockback is resisted while you hold a direction.
-local MOVE_FORCE = math.huge
+-- Speed: effective = SPEED_FIXED (if > 0) else the game's current WalkSpeed * SPEED_MULT.
+-- Multiply mode respects carry slow-downs / boosts and never fights the game's rooting.
+local SPEED_MULT = 2        -- multiplier on the game's live WalkSpeed
+local SPEED_FIXED = 0       -- if > 0, move at exactly this speed instead of multiplying
 
-local STEP_ASSIST = true    -- glide up small ledges/stairs instead of getting stuck
-local STEP_HEIGHT = 3       -- tallest ledge that counts as a step (studs)
-local STEP_PROBE = 1.8      -- how far ahead to look for a step (studs)
-local STEP_UP_SPEED = 16    -- max rise rate while clearing a step
-local GROUND_TOLERANCE = 0.9 -- feet-to-floor gap still counted as grounded
-local FLOOR_VEL_DEADZONE = 0.25 -- ignore floor velocities smaller than this (kills jitter from settling parts)
+local AIR_CONTROL = true    -- steer while airborne (only matters while boosting)
+local SLOPE_GLUE = true     -- hug slopes instead of launching off them at high speed
+local STEP_ASSIST = true    -- glide up small ledges/stairs while boosting
+local STEP_HEIGHT = 3       -- tallest ledge treated as a step (studs)
+local STEP_PROBE = 1.8      -- base look-ahead for a step (studs; grows with speed)
+local STEP_UP_SPEED = 40    -- base rise rate over a step (studs/s; grows with speed)
+local GROUND_TOLERANCE = 0.9
+local FLOOR_VEL_DEADZONE = 0.25
 
 local humanoid: Humanoid? = nil
 local rootPart: BasePart? = nil
 local attachment: Attachment? = nil
 local moveLV: LinearVelocity? = nil
 local stepLV: LinearVelocity? = nil
-local runTrack: AnimationTrack? = nil
 local rayParams: RaycastParams? = nil
 
-local footOffset = 3        -- HRP-centre to sole distance (recomputed per character / rig)
+local footOffset = 3
 local stepping = false
 local stepTargetY = 0
 local stepDeadline = 0
-local jumpSuppressUntil = 0 -- brief window after a jump press where step-assist stays off
-local airFloorVX, airFloorVZ = 0, 0 -- platform velocity retained through a jump
+local jumpSuppressUntil = 0
+local airFloorVX, airFloorVZ = 0, 0
 
 local connections: { RBXScriptConnection } = {}
 local alive = true
@@ -76,7 +80,7 @@ local function build()
 	move.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
 	move.PrimaryTangentAxis = Vector3.new(1, 0, 0)
 	move.SecondaryTangentAxis = Vector3.new(0, 0, 1)
-	move.MaxForce = MOVE_FORCE
+	move.MaxForce = math.huge
 	move.PlaneVelocity = Vector2.zero
 	move.Enabled = false
 	move.Parent = rootPart
@@ -103,85 +107,19 @@ local function computeFootOffset(char: Model, hum: Humanoid, hrp: BasePart): num
 		local leg = char:FindFirstChild("Left Leg") or char:FindFirstChild("Right Leg")
 		if leg and leg:IsA("BasePart") then
 			off += leg.Size.Y
+		else
+			off = math.max(off, 3)
 		end
 	end
 	return off
 end
 
-local function setupAnim(char: Model)
-	runTrack = nil
-	local myHum = humanoid
-	if not myHum then
-		return
-	end
-	task.spawn(function()
-		local animator = myHum:FindFirstChildOfClass("Animator") or myHum:WaitForChild("Animator", 5)
-		if not alive or humanoid ~= myHum or not animator then
-			return
-		end
-		local animId: string? = nil
-		local animate = char:FindFirstChild("Animate")
-		if animate then
-			for _, d in ipairs(animate:GetDescendants()) do
-				if d:IsA("Animation") and d.AnimationId ~= "" and string.find(d.Name:lower(), "run") then
-					animId = d.AnimationId
-					break
-				end
-			end
-			if not animId then
-				for _, d in ipairs(animate:GetDescendants()) do
-					if d:IsA("Animation") and d.AnimationId ~= "" then
-						local n = d.Name:lower()
-						if string.find(n, "walk") or string.find(n, "jog") or string.find(n, "sprint") or string.find(n, "loco") then
-							animId = d.AnimationId
-							break
-						end
-					end
-				end
-			end
-		end
-		if not animId or animId == "" then
-			animId = (myHum.RigType == Enum.HumanoidRigType.R6) and "rbxassetid://180426354" or "rbxassetid://913376220"
-		end
-		local anim = Instance.new("Animation")
-		anim.AnimationId = animId
-		local ok, track = pcall(function()
-			return animator:LoadAnimation(anim)
-		end)
-		if not alive or humanoid ~= myHum then
-			return
-		end
-		if ok and track then
-			pcall(function()
-				track.Priority = Enum.AnimationPriority.Movement
-				track.Looped = true
-			end)
-			runTrack = track
-		end
-	end)
-end
-
-local function updateAnim(active: boolean)
-	local track = runTrack
-	if not track then
-		return
-	end
-	if active then
-		if not track.IsPlaying then
-			pcall(function() track:Play(0.1) end)
-		end
-		pcall(function() track:AdjustSpeed(math.clamp(WALK_SPEED / 16, 0.5, 3)) end)
-	elseif track.IsPlaying then
-		pcall(function() track:Stop(0.15) end)
-	end
-end
-
 local function onCharacterAdded(char: Model)
-	local hum = char:WaitForChild("Humanoid", 10) :: Humanoid?
+	local hum = char:WaitForChild("Humanoid") :: Humanoid
 	if not alive or not hum then
 		return
 	end
-	local hrp = char:WaitForChild("HumanoidRootPart", 10) :: BasePart?
+	local hrp = char:WaitForChild("HumanoidRootPart") :: BasePart
 	if not alive or not hrp then
 		return
 	end
@@ -189,21 +127,17 @@ local function onCharacterAdded(char: Model)
 	rootPart = hrp
 	footOffset = computeFootOffset(char, hum, hrp)
 	build()
-	hum.WalkSpeed = 0        -- the constraint owns horizontal movement
-	hum.UseJumpPower = true  -- keep native jumping (and the mobile jump button) working
-	hum.JumpPower = JUMP_POWER
-	hum.AutoRotate = true
 
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = { char }
 	params.IgnoreWater = true
+	params.RespectCanCollide = true
 	rayParams = params
 
 	stepping = false
 	jumpSuppressUntil = 0
 	airFloorVX, airFloorVZ = 0, 0
-	setupAnim(char)
 end
 
 local function stateBlocksMovement(): boolean
@@ -216,6 +150,10 @@ local function stateBlocksMovement(): boolean
 		or st == Enum.HumanoidStateType.Physics
 		or st == Enum.HumanoidStateType.FallingDown
 		or st == Enum.HumanoidStateType.Seated
+		or st == Enum.HumanoidStateType.Climbing
+		or st == Enum.HumanoidStateType.Swimming
+		or st == Enum.HumanoidStateType.PlatformStanding
+		or st == Enum.HumanoidStateType.GettingUp
 		or st == Enum.HumanoidStateType.Dead
 end
 
@@ -227,41 +165,38 @@ local function feetY(): number?
 	return hrp.Position.Y - footOffset
 end
 
--- returns floor top Y and the floor part beneath the character (or nil, nil)
-local function groundInfo(): (number?, BasePart?)
+-- floor top Y, the floor part, and the floor normal beneath the character
+local function groundInfo(): (number?, BasePart?, Vector3?)
 	local hrp = rootPart
 	if not hrp or not rayParams then
-		return nil, nil
+		return nil, nil, nil
 	end
 	local hit = workspace:Raycast(hrp.Position, Vector3.new(0, -(footOffset + 2.5), 0), rayParams)
 	if not hit then
-		return nil, nil
+		return nil, nil, nil
 	end
-	return hit.Position.Y, hit.Instance :: BasePart
+	return hit.Position.Y, hit.Instance :: BasePart, hit.Normal
 end
 
--- true only for a genuine climbable step (vertical face + walkable top within STEP_HEIGHT)
-local function detectStep(flat: Vector3, floorTopY: number): number?
+-- genuine climbable step (near-vertical face + walkable top within STEP_HEIGHT)
+local function detectStep(flat: Vector3, floorTopY: number, probe: number): number?
 	local hrp = rootPart
 	if not hrp or not rayParams then
 		return nil
 	end
 	local faceOrigin = Vector3.new(hrp.Position.X, floorTopY + 0.2, hrp.Position.Z)
-	local face = workspace:Raycast(faceOrigin, flat * STEP_PROBE, rayParams)
+	local face = workspace:Raycast(faceOrigin, flat * probe, rayParams)
 	if not face then
 		return nil
 	end
 	if math.abs(face.Normal.Y) > 0.35 then
-		return nil -- inclined surface (ramp): let the horizontal push climb it, don't force lift
+		return nil -- ramp, handled by slope glue
 	end
 	local ahead = face.Position + flat * 0.5
 	local topOrigin = Vector3.new(ahead.X, floorTopY + STEP_HEIGHT + 1.0, ahead.Z)
 	local top = workspace:Raycast(topOrigin, Vector3.new(0, -(STEP_HEIGHT + 1.5), 0), rayParams)
-	if not top then
-		return nil -- no surface on top (railing / thin lip / overhang)
-	end
-	if top.Normal.Y < 0.7 then
-		return nil -- top is not walkable
+	if not top or top.Normal.Y < 0.7 then
+		return nil
 	end
 	local h = top.Position.Y - floorTopY
 	if h < 0.15 or h > STEP_HEIGHT then
@@ -286,13 +221,12 @@ local function disableAll()
 	stopStep()
 end
 
--- a jump press stops any active step lift and keeps it off briefly so the jump arc is clean
 table.insert(connections, UserInputService.JumpRequest:Connect(function()
-	jumpSuppressUntil = tick() + 0.3
+	jumpSuppressUntil = tick() + 0.25
 	stopStep()
 end))
 
-table.insert(connections, RunService.Heartbeat:Connect(function()
+table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	local move = moveLV
 	local hum = humanoid
 	local hrp = rootPart
@@ -300,52 +234,69 @@ table.insert(connections, RunService.Heartbeat:Connect(function()
 		return
 	end
 
-	if hum.WalkSpeed ~= 0 then hum.WalkSpeed = 0 end
-	if hum.JumpPower ~= JUMP_POWER then hum.JumpPower = JUMP_POWER end
-	if not hum.UseJumpPower then hum.UseJumpPower = true end
-	if not hum.AutoRotate then hum.AutoRotate = true end
-
 	if hum.Health <= 0 or stateBlocksMovement() then
 		disableAll()
-		updateAnim(false)
 		return
 	end
 
-	local floorTopY, floorPart = groundInfo()
+	local gameWS = hum.WalkSpeed
+	local rooted = gameWS <= 0.01
+	local effectiveSpeed = (SPEED_FIXED > 0) and SPEED_FIXED or (gameWS * SPEED_MULT)
+	local boosting = (not rooted) and effectiveSpeed > gameWS + 0.1
+
+	if not boosting then
+		-- vanilla native movement handles everything (speed, slopes, stairs, anim, rooting)
+		disableAll()
+		return
+	end
+
+	local floorTopY, floorPart, floorNormal = groundInfo()
 	local fy = feetY()
 	local grounded = floorTopY ~= nil and fy ~= nil and (fy - floorTopY) <= GROUND_TOLERANCE
 
 	local dir = hum.MoveDirection
 	local moving = dir.Magnitude > 0.01
 	local flat = moving and Vector3.new(dir.X, 0, dir.Z).Unit or Vector3.zero
+	local liftCap = math.max(STEP_UP_SPEED, effectiveSpeed)
 
-	-- step assist (decided first so the movement branch can keep pushing forward through a step)
-	if not STEP_ASSIST or tick() < jumpSuppressUntil or not moving then
+	-- vertical control: step-assist (climb ledges) and slope-glue (hug ramps), via stepLV
+	if tick() < jumpSuppressUntil or not moving or not grounded then
 		stopStep()
 	elseif stepping then
 		local nowFy = feetY()
 		if nowFy == nil or nowFy >= stepTargetY - 0.1 or tick() > stepDeadline then
 			stopStep()
 		elseif stepLV and stepLV.Parent then
-			stepLV.LineVelocity = math.clamp((stepTargetY - nowFy) * 8, 3, STEP_UP_SPEED)
+			stepLV.LineVelocity = math.clamp((stepTargetY - nowFy) * 10, 2, liftCap)
 			stepLV.Enabled = true
-		end
-	elseif grounded and floorTopY and fy then
-		local topY = detectStep(flat, floorTopY)
-		if topY and (topY - fy) > 0.25 and stepLV and stepLV.Parent then
-			stepping = true
-			stepTargetY = topY
-			stepDeadline = tick() + 0.6
-			stepLV.LineVelocity = math.clamp((topY - fy) * 8, 3, STEP_UP_SPEED)
-			stepLV.Enabled = true
-		else
-			stopStep()
 		end
 	else
-		stopStep()
+		local started = false
+		if STEP_ASSIST and floorTopY and fy then
+			local topY = detectStep(flat, floorTopY, STEP_PROBE + effectiveSpeed * 0.04)
+			if topY and (topY - fy) > 0.25 and stepLV and stepLV.Parent then
+				stepping = true
+				stepTargetY = topY
+				stepDeadline = tick() + 0.6
+				stepLV.LineVelocity = math.clamp((topY - fy) * 10, 2, liftCap)
+				stepLV.Enabled = true
+				started = true
+			end
+		end
+		if not started then
+			if SLOPE_GLUE and floorNormal and floorNormal.Y > 0.3 and floorNormal.Y < 0.98 and stepLV and stepLV.Parent then
+				local vhx = dir.X * effectiveSpeed
+				local vhz = dir.Z * effectiveSpeed
+				local vy = -(vhx * floorNormal.X + vhz * floorNormal.Z) / floorNormal.Y
+				stepLV.LineVelocity = math.clamp(vy, -(effectiveSpeed * 2 + 5), effectiveSpeed * 2 + 5)
+				stepLV.Enabled = true
+			else
+				stopStep()
+			end
+		end
 	end
 
-	-- floor (platform) velocity so moving platforms carry you; retained through a jump
+	-- inherit the floor's motion so moving platforms carry you; decays after you leave one
 	local fvx, fvz = 0, 0
 	if grounded and floorPart and floorTopY then
 		local ok, v = pcall(function()
@@ -356,24 +307,22 @@ table.insert(connections, RunService.Heartbeat:Connect(function()
 			fvz = math.abs(v.Z) > FLOOR_VEL_DEADZONE and v.Z or 0
 		end
 		airFloorVX, airFloorVZ = fvx, fvz
+	else
+		local decay = math.max(0, 1 - dt * 3)
+		airFloorVX *= decay
+		airFloorVZ *= decay
 	end
 	local baseVX = grounded and fvx or airFloorVX
 	local baseVZ = grounded and fvz or airFloorVZ
 
 	if moving and (grounded or AIR_CONTROL or stepping) then
-		move.PlaneVelocity = Vector2.new(dir.X * WALK_SPEED + baseVX, dir.Z * WALK_SPEED + baseVZ)
-		move.Enabled = true
-	elseif grounded then
-		-- idle on ground: hold position (crisp stop) or ride the platform, no coasting
-		move.PlaneVelocity = Vector2.new(fvx, fvz)
+		move.PlaneVelocity = Vector2.new(dir.X * effectiveSpeed + baseVX, dir.Z * effectiveSpeed + baseVZ)
 		move.Enabled = true
 	else
-		-- idle in the air: keep natural momentum, let external forces act
+		-- idle (or airborne with no air control): let native movement hold/carry you
 		move.Enabled = false
 		move.PlaneVelocity = Vector2.zero
 	end
-
-	updateAnim(moving and grounded)
 end))
 
 local function cleanup()
@@ -384,23 +333,11 @@ local function cleanup()
 	table.clear(connections)
 	stopStep()
 	teardown()
-	local hum = humanoid
-	if hum then
-		pcall(function()
-			hum.WalkSpeed = 16
-			hum.AutoRotate = true
-		end)
-	end
-	local track = runTrack
-	if track then
-		pcall(function() track:Stop(0) end)
-	end
-	runTrack = nil
 	_G.__LinearMovementCleanup = nil
 end
 _G.__LinearMovementCleanup = cleanup
 
 if player.Character then
-	onCharacterAdded(player.Character)
+	task.spawn(onCharacterAdded, player.Character)
 end
 table.insert(connections, player.CharacterAdded:Connect(onCharacterAdded))
