@@ -381,6 +381,27 @@ local function onCharacterAdded(char: Model)
 		end
 	end))
 
+	-- State-change trace. Humanoid state REPLICATES to the server, so this log is a record of what
+	-- the server is being told about you. A knocked state followed immediately by a forced Running
+	-- (see the "CONTRADICTS" line) is another script cancelling a ragdoll the server applied -- the
+	-- client asserting it is not ragdolled while the server knows it is.
+	local lastKnockAt = 0
+	table.insert(connections, hum.StateChanged:Connect(function(old, new)
+		local now = tick()
+		local knocked = new == Enum.HumanoidStateType.Ragdoll
+			or new == Enum.HumanoidStateType.Physics
+			or new == Enum.HumanoidStateType.FallingDown
+			or new == Enum.HumanoidStateType.PlatformStanding
+		if knocked then
+			lastKnockAt = now
+		end
+		linLog("state", ("%s -> %s"):format(tostring(old), tostring(new)))
+		if new == Enum.HumanoidStateType.Running and lastKnockAt > 0 and now - lastKnockAt < 0.5 then
+			linLog("state", ("CONTRADICTS: forced Running %.2fs after a knock -- something is cancelling"
+				.. " the ragdoll, and that disagreement replicates to the server"):format(now - lastKnockAt))
+		end
+	end))
+
 	-- Knock takeover: the moment you get ragdolled, sample the momentum the hit gave you and hand it
 	-- to the constraint as an Impulse. From frame one the flight arc is constraint-driven rather than
 	-- raw physics, which is the whole point -- getting knocked should come out linear too.
