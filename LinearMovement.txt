@@ -18,6 +18,13 @@ local SPEED_MULT = 1        -- multiplier on the game's live WalkSpeed (1 = vani
 local SPEED_FIXED = 0       -- if > 0, move at exactly this speed instead of multiplying
 
 local AIR_CONTROL = true    -- steer while airborne (only matters while boosting)
+-- Dominance: force other scripts' movement off so only this one moves you.
+-- SUPPRESS_OTHER wipes foreign BodyVelocity/LinearVelocity/etc off your HRP each frame.
+-- MASK_WALKSPEED (>0) pins WalkSpeed to that value so other scripts' WalkSpeed spikes are hidden;
+-- pair it with SPEED_FIXED for your real speed. NOTE: neither can hide a raw AssemblyLinearVelocity
+-- write or beat a server displacement check - for those, disable the other script's mover instead.
+local SUPPRESS_OTHER = false
+local MASK_WALKSPEED = 0
 local SLOPE_GLUE = true     -- hug slopes instead of launching off them at high speed
 local STEP_ASSIST = true    -- glide up small ledges/stairs while boosting
 local STEP_HEIGHT = 3       -- tallest ledge treated as a step (studs)
@@ -223,6 +230,19 @@ local function detectStep(flat: Vector3, floorTopY: number, probe: number): numb
 	return top.Position.Y
 end
 
+local OURS = { LinearMove = true, LinearStep = true, LinearMoveAttachment = true }
+local function suppressForeign()
+	local hrp = rootPart
+	if not hrp then
+		return
+	end
+	for _, d in ipairs(hrp:GetChildren()) do
+		if not OURS[d.Name] and (d:IsA("BodyMover") or d:IsA("Constraint")) then
+			d:Destroy()
+		end
+	end
+end
+
 local function stopStep()
 	stepping = false
 	if stepLV and stepLV.Parent then
@@ -251,6 +271,13 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	local hrp = rootPart
 	if not move or not move.Parent or not hum or not hrp then
 		return
+	end
+
+	if SUPPRESS_OTHER then
+		suppressForeign()
+	end
+	if MASK_WALKSPEED > 0 and hum.WalkSpeed ~= MASK_WALKSPEED then
+		hum.WalkSpeed = MASK_WALKSPEED
 	end
 
 	if hum.Health <= 0 or stateBlocksMovement() then
