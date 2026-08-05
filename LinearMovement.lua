@@ -14,7 +14,7 @@ local player = Players.LocalPlayer
 
 -- Speed: effective = SPEED_FIXED (if > 0) else the game's current WalkSpeed * SPEED_MULT.
 -- Multiply mode respects carry slow-downs / boosts and never fights the game's rooting.
-local SPEED_MULT = 2        -- multiplier on the game's live WalkSpeed
+local SPEED_MULT = 1        -- multiplier on the game's live WalkSpeed (1 = vanilla speed; raise it to go faster)
 local SPEED_FIXED = 0       -- if > 0, move at exactly this speed instead of multiplying
 
 local AIR_CONTROL = true    -- steer while airborne (only matters while boosting)
