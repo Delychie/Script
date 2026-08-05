@@ -28,7 +28,7 @@ local MASK_WALKSPEED = 0
 -- Executor-only: no-op ANY Lua write to Velocity / AssemblyLinearVelocity on your HRP, so other
 -- scripts (e.g. del hub) that move you by writing velocity are neutralised and only this constraint
 -- moves you. Needs hookmetamethod + newcclosure. Read the caveats before enabling it.
-local BLOCK_FOREIGN_VELOCITY = true
+local BLOCK_FOREIGN_VELOCITY = false
 local SLOPE_GLUE = true     -- hug slopes instead of launching off them at high speed
 local STEP_ASSIST = true    -- glide up small ledges/stairs while boosting
 local STEP_HEIGHT = 3       -- tallest ledge treated as a step (studs)
