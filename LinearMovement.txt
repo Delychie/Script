@@ -126,6 +126,7 @@ local linVec = Vector3.zero          -- the velocity that intent wants (or the m
 local linUntil = 0                   -- when this intent expires and we hand back to physics
 local linStart = 0                   -- when it began (used to shape the Damp/Impulse curve)
 local linPosTarget: Vector3? = nil   -- a caught teleport target to glide to
+local linNoY = false                 -- intent only meant to change horizontal motion; leave Y alone
 local linAngVec = Vector3.zero       -- caught angular velocity to reproduce
 local linAngUntil = 0
 local charGen = 0
@@ -364,6 +365,7 @@ local function onCharacterAdded(char: Model)
 	stepping = false
 	linKind = nil
 	linPosTarget = nil
+	linNoY = false
 	linVec = Vector3.zero
 	linAngVec = Vector3.zero
 	linAngUntil = 0
@@ -616,6 +618,7 @@ end
 local function stopLinearize()
 	linKind = nil
 	linPosTarget = nil
+	linNoY = false
 	linVec = Vector3.zero
 	linAngVec = Vector3.zero
 	linAngUntil = 0
@@ -634,10 +637,14 @@ local function stopLinearize()
 end
 
 -- Record a caught intent. Classification happens here so every catch site stays dumb.
-function noteIntent(kind: string, vec: Vector3)
+-- noY marks the very common "preserve my Y" idiom, e.g. Velocity = Vector3.new(x, Velocity.Y, z).
+-- That is a horizontal command: the author is explicitly NOT changing vertical motion. Driving Y to
+-- the sampled value would pin your fall speed and cancel gravity's acceleration.
+function noteIntent(kind: string, vec: Vector3, noY: boolean?)
 	local now = tick()
 	linKind = kind
 	linStart = now
+	linNoY = noY == true
 	if kind == "Damp" then
 		-- bleed the momentum you ACTUALLY have; "stop" is a brake, not a position hold
 		local hrp = rootPart
@@ -670,7 +677,11 @@ local function applyLinear(vec: Vector3)
 		lin.Enabled = true
 	end
 	if linY and linY.Parent then
-		if not LINEARIZE_GRAVITY or math.abs(vec.Y) > 0.5 then
+		if linNoY then
+			-- the source explicitly preserved Y; hands off the vertical axis
+			linY.Enabled = false
+			linY.LineVelocity = 0
+		elseif not LINEARIZE_GRAVITY or math.abs(vec.Y) > 0.5 then
 			linY.LineVelocity = vec.Y
 			linY.Enabled = true
 		else
@@ -1006,7 +1017,11 @@ if (BLOCK_FOREIGN_VELOCITY or SUPPRESS_DURING_RAGDOLL or LINEARIZE_FOREIGN or LI
 					-- A zero write is a Damp (brake), not a Set -- otherwise a script that zeroes every
 					-- frame would pin you in mid-air.
 					if LINEARIZE_FOREIGN and not LINEARIZE_DEBUG and (not knocked or LINEARIZE_RAGDOLL) then
-						noteIntent(value.Magnitude < 0.05 and "Damp" or "Set", value)
+						-- Reading self[key] goes through __index, which we do not hook, so this cannot
+						-- recurse. If the new Y matches the current Y the writer is preserving it.
+						local okCur, cur = pcall(function() return self[key] end)
+						local noY = okCur and typeof(cur) == "Vector3" and math.abs(value.Y - cur.Y) < 0.5
+						noteIntent(value.Magnitude < 0.05 and "Damp" or "Set", value, noY)
 						return
 					end
 					-- Fallback when the transformer is off (or is set to stay out of knocks): swallow
