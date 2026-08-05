@@ -42,11 +42,21 @@ local STEP_UP_SPEED = 40    -- base rise rate over a step (studs/s; grows with s
 local GROUND_TOLERANCE = 0.9
 local FLOOR_VEL_DEADZONE = 0.25
 
+-- Auto floor-drop, done the LINEAR way: when you're airborne above FLOOR_TRIGGER_Y, drive a
+-- downward LinearVelocity that pulls you back to FLOOR_Y and then hands you back to gravity.
+-- This replaces the old auto-TP that hard-teleported (CFrame =) and zeroed AssemblyLinearVelocity;
+-- no teleport, no raw velocity writes -- the constraint does all the moving.
+local AUTO_FLOOR = true          -- master toggle for the linear floor-drop
+local FLOOR_Y = -7               -- Y you get pulled down to (matches the old AUTO_TP_GROUND_Y)
+local FLOOR_TRIGGER_Y = 7        -- only engage once you're airborne above this Y
+local FLOOR_DROP_SPEED = 200     -- max downward studs/s while dropping (eases off near FLOOR_Y)
+
 local humanoid: Humanoid? = nil
 local rootPart: BasePart? = nil
 local attachment: Attachment? = nil
 local moveLV: LinearVelocity? = nil
 local stepLV: LinearVelocity? = nil
+local dropLV: LinearVelocity? = nil
 local rayParams: RaycastParams? = nil
 
 local footOffset = 3
@@ -58,6 +68,7 @@ local knockUntil = 0
 local lastGlueTime = 0
 local lastGlueVy = 0
 local airFloorVX, airFloorVZ = 0, 0
+local dropping = false
 local charGen = 0
 
 local KNOCK_THRESHOLD = 50   -- horizontal speed over expected that counts as external knockback
@@ -68,6 +79,7 @@ local alive = true
 local function teardown()
 	if moveLV then moveLV:Destroy() moveLV = nil end
 	if stepLV then stepLV:Destroy() stepLV = nil end
+	if dropLV then dropLV:Destroy() dropLV = nil end
 	if attachment then attachment:Destroy() attachment = nil end
 end
 
@@ -78,7 +90,7 @@ end
 local function purgeOld(part: BasePart)
 	for _, c in ipairs(part:GetChildren()) do
 		local n = c.Name
-		if n == "LinearMoveAttachment" or n == "LinearMove" or n == "LinearJump" or n == "LinearStep" then
+		if n == "LinearMoveAttachment" or n == "LinearMove" or n == "LinearJump" or n == "LinearStep" or n == "LinearDrop" then
 			c:Destroy()
 		end
 	end
@@ -118,9 +130,21 @@ local function build()
 	step.Enabled = false
 	step.Parent = rootPart
 
+	local drop = Instance.new("LinearVelocity")
+	drop.Name = "LinearDrop"
+	drop.Attachment0 = att
+	drop.RelativeTo = Enum.ActuatorRelativeTo.World
+	drop.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
+	drop.LineDirection = Vector3.new(0, 1, 0)
+	drop.MaxForce = math.huge
+	drop.LineVelocity = 0
+	drop.Enabled = false
+	drop.Parent = rootPart
+
 	attachment = att
 	moveLV = move
 	stepLV = step
+	dropLV = drop
 end
 
 local function computeFootOffset(char: Model, hum: Humanoid, hrp: BasePart): number
@@ -160,6 +184,7 @@ local function onCharacterAdded(char: Model)
 	rayParams = params
 
 	stepping = false
+	dropping = false
 	jumpSuppressUntil = 0
 	knockUntil = 0
 	lastGlueTime = 0
@@ -253,7 +278,7 @@ local function detectStep(flat: Vector3, floorTopY: number, probe: number): numb
 	return top.Position.Y
 end
 
-local OURS = { LinearMove = true, LinearStep = true, LinearMoveAttachment = true }
+local OURS = { LinearMove = true, LinearStep = true, LinearDrop = true, LinearMoveAttachment = true }
 local function suppressForeign()
 	local hrp = rootPart
 	if not hrp then
@@ -271,6 +296,47 @@ local function stopStep()
 	if stepLV and stepLV.Parent then
 		stepLV.Enabled = false
 		stepLV.LineVelocity = 0
+	end
+end
+
+local function stopDrop()
+	dropping = false
+	if dropLV and dropLV.Parent then
+		dropLV.Enabled = false
+		dropLV.LineVelocity = 0
+	end
+end
+
+-- Linear replacement for the old auto-TP-down: instead of hard-teleporting to FLOOR_Y and zeroing
+-- AssemblyLinearVelocity, drive a downward LinearVelocity that pulls you to FLOOR_Y, easing off as
+-- you arrive, then hand back to gravity. Runs independently of the speed booster.
+local function updateAutoFloor()
+	local drop = dropLV
+	local hum = humanoid
+	local hrp = rootPart
+	if not AUTO_FLOOR or not drop or not drop.Parent or not hum or not hrp then
+		stopDrop()
+		return
+	end
+	-- never fight death or a ragdoll/knock; let those play out
+	if hum.Health <= 0 or isKnockedState() then
+		stopDrop()
+		return
+	end
+	local inAir = hum.FloorMaterial == Enum.Material.Air
+	if inAir and hrp.Position.Y >= FLOOR_TRIGGER_Y then
+		dropping = true
+	end
+	if dropping then
+		local dy = FLOOR_Y - hrp.Position.Y -- negative while you're above the floor
+		if not inAir or dy > -0.5 then
+			-- landed, or reached FLOOR_Y: stop driving and let normal physics take over
+			stopDrop()
+		else
+			-- ease the descent so you settle at FLOOR_Y instead of blasting through it
+			drop.LineVelocity = math.clamp(dy * 8, -FLOOR_DROP_SPEED, -4)
+			drop.Enabled = true
+		end
 	end
 end
 
@@ -302,6 +368,9 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	if MASK_WALKSPEED > 0 and hum.WalkSpeed ~= MASK_WALKSPEED then
 		hum.WalkSpeed = MASK_WALKSPEED
 	end
+
+	-- linear floor-drop runs on its own, independent of the speed booster below
+	updateAutoFloor()
 
 	if hum.Health <= 0 or stateBlocksMovement() then
 		disableAll()
@@ -426,6 +495,7 @@ local function cleanup()
 	end
 	table.clear(connections)
 	stopStep()
+	stopDrop()
 	teardown()
 	_G.__LinearMovementCleanup = nil
 end
