@@ -29,6 +29,11 @@ local MASK_WALKSPEED = 0    -- 0 = don't touch WalkSpeed (leave default). WARNIN
 -- scripts (e.g. del hub) that move you by writing velocity are neutralised and only this constraint
 -- moves you. Needs hookmetamethod + newcclosure. Read the caveats before enabling it.
 local BLOCK_FOREIGN_VELOCITY = false
+-- Executor-only: while you're RAGDOLLED / knocked (hit by a bat, flung, getting up), no-op any other
+-- script's velocity writes on your HRP so the ragdoll plays out naturally and you don't get kicked for
+-- "moving while limp". Scoped strictly to the knocked window, so it never touches walking/jumps/auto-walk.
+-- Does NOT stop the hit or the ragdoll itself. Needs hookmetamethod + newcclosure.
+local SUPPRESS_DURING_RAGDOLL = true
 local SLOPE_GLUE = true     -- hug slopes instead of launching off them at high speed
 local STEP_ASSIST = true    -- glide up small ledges/stairs while boosting
 local STEP_HEIGHT = 3       -- tallest ledge treated as a step (studs)
@@ -184,6 +189,20 @@ local function stateBlocksMovement(): boolean
 		or st == Enum.HumanoidStateType.PlatformStanding
 		or st == Enum.HumanoidStateType.GettingUp
 		or st == Enum.HumanoidStateType.Dead
+end
+
+-- specifically the "knocked / limp" states where you should NOT be moving under your own power
+local function isKnockedState(): boolean
+	local hum = humanoid
+	if not hum then
+		return false
+	end
+	local st = hum:GetState()
+	return st == Enum.HumanoidStateType.Ragdoll
+		or st == Enum.HumanoidStateType.Physics
+		or st == Enum.HumanoidStateType.FallingDown
+		or st == Enum.HumanoidStateType.PlatformStanding
+		or st == Enum.HumanoidStateType.GettingUp
 end
 
 local function feetY(): number?
@@ -412,20 +431,27 @@ local function cleanup()
 end
 _G.__LinearMovementCleanup = cleanup
 
-if BLOCK_FOREIGN_VELOCITY and hookmetamethod and newcclosure then
+if (BLOCK_FOREIGN_VELOCITY or SUPPRESS_DURING_RAGDOLL) and hookmetamethod and newcclosure then
 	pcall(function()
 		local realNewindex
 		realNewindex = hookmetamethod(game, "__newindex", newcclosure(function(self, key, value)
-			-- Only swallow velocity writes on our HRP WHILE we're actively walking. That's when
-			-- del hub's manual mover fires, so its walking is replaced by ours -- but its other
-			-- features (TP, auto-grab, etc., which act when you're not moving) still work.
 			if (key == "Velocity" or key == "AssemblyLinearVelocity") and self == rootPart and typeof(value) == "Vector3" then
-				local hum = humanoid
-				if hum and hum.MoveDirection.Magnitude > 0.01 then
-					-- only swallow horizontal (walk) overrides; let vertical writes (jumps / inf jump) through
-					local cur = self[key]
-					if math.abs(value.Y - cur.Y) < 1 then
-						return
+				-- While ragdolled/knocked, swallow ALL foreign velocity writes so the ragdoll plays
+				-- out naturally and the server doesn't kick you for moving while you're supposed to be
+				-- limp. This is the only window this branch touches -- walking/jumps aren't affected.
+				if SUPPRESS_DURING_RAGDOLL and isKnockedState() then
+					return
+				end
+				-- Optional: also swallow velocity writes on our HRP WHILE we're actively walking, so
+				-- another script's walk mover is replaced by ours (its TP/auto-grab still work).
+				if BLOCK_FOREIGN_VELOCITY then
+					local hum = humanoid
+					if hum and hum.MoveDirection.Magnitude > 0.01 then
+						-- only swallow horizontal (walk) overrides; let vertical writes (jumps) through
+						local cur = self[key]
+						if math.abs(value.Y - cur.Y) < 1 then
+							return
+						end
 					end
 				end
 			end
