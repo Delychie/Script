@@ -419,10 +419,14 @@ if BLOCK_FOREIGN_VELOCITY and hookmetamethod and newcclosure then
 			-- Only swallow velocity writes on our HRP WHILE we're actively walking. That's when
 			-- del hub's manual mover fires, so its walking is replaced by ours -- but its other
 			-- features (TP, auto-grab, etc., which act when you're not moving) still work.
-			if (key == "Velocity" or key == "AssemblyLinearVelocity") and self == rootPart then
+			if (key == "Velocity" or key == "AssemblyLinearVelocity") and self == rootPart and typeof(value) == "Vector3" then
 				local hum = humanoid
 				if hum and hum.MoveDirection.Magnitude > 0.01 then
-					return
+					-- only swallow horizontal (walk) overrides; let vertical writes (jumps / inf jump) through
+					local cur = self[key]
+					if math.abs(value.Y - cur.Y) < 1 then
+						return
+					end
 				end
 			end
 			return realNewindex(self, key, value)
