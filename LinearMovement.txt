@@ -416,8 +416,14 @@ if BLOCK_FOREIGN_VELOCITY and hookmetamethod and newcclosure then
 	pcall(function()
 		local realNewindex
 		realNewindex = hookmetamethod(game, "__newindex", newcclosure(function(self, key, value)
+			-- Only swallow velocity writes on our HRP WHILE we're actively walking. That's when
+			-- del hub's manual mover fires, so its walking is replaced by ours -- but its other
+			-- features (TP, auto-grab, etc., which act when you're not moving) still work.
 			if (key == "Velocity" or key == "AssemblyLinearVelocity") and self == rootPart then
-				return -- swallow foreign velocity writes on our HRP; the constraint does the moving
+				local hum = humanoid
+				if hum and hum.MoveDirection.Magnitude > 0.01 then
+					return
+				end
 			end
 			return realNewindex(self, key, value)
 		end))
