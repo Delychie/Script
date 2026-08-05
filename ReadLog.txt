@@ -1,0 +1,58 @@
+-- ReadLog: dump the LinearMovement log after a session ends.
+-- Paste this into your executor once you're back in (any game, or even the menu).
+
+local FILE = "LinearMovement_log.txt"
+
+if not isfile then
+	warn("[ReadLog] this executor has no isfile/readfile")
+	return
+end
+
+if not isfile(FILE) then
+	warn("[ReadLog] no log file found.")
+	warn("[ReadLog] Check that LOG_TO_FILE = true and LINEARIZE_DEBUG/AUDIT = true in LinearMovement,")
+	warn("[ReadLog] and that the script actually ran before the session ended.")
+	-- show what IS in the workspace folder, so a renamed/relocated file still turns up
+	if listfiles then
+		local ok, files = pcall(listfiles, "")
+		if ok and files then
+			print("[ReadLog] files in executor workspace:")
+			for _, f in ipairs(files) do
+				print("   " .. tostring(f))
+			end
+		end
+	end
+	return
+end
+
+local ok, data = pcall(readfile, FILE)
+if not ok or not data then
+	warn("[ReadLog] could not read " .. FILE)
+	return
+end
+
+local lines = {}
+for line in data:gmatch("[^\r\n]+") do
+	table.insert(lines, line)
+end
+
+print(("[ReadLog] %s -- %d lines, %d bytes"):format(FILE, #lines, #data))
+
+-- The interesting part is the END of the log: the moments right before the session ended.
+local TAIL = 60
+local from = math.max(1, #lines - TAIL + 1)
+if from > 1 then
+	print(("[ReadLog] ... showing last %d of %d lines ..."):format(#lines - from + 1, #lines))
+end
+for i = from, #lines do
+	print(lines[i])
+end
+
+-- Copy the whole thing so you can paste it somewhere readable.
+if setclipboard then
+	pcall(setclipboard, data)
+	print("[ReadLog] full log copied to clipboard")
+end
+
+-- Uncomment to start fresh before the next test run:
+-- if delfile then delfile(FILE) print("[ReadLog] log cleared") end
