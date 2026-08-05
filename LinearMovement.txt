@@ -42,21 +42,28 @@ local STEP_UP_SPEED = 40    -- base rise rate over a step (studs/s; grows with s
 local GROUND_TOLERANCE = 0.9
 local FLOOR_VEL_DEADZONE = 0.25
 
--- Auto floor-drop, done the LINEAR way: when you're airborne above FLOOR_TRIGGER_Y, drive a
--- downward LinearVelocity that pulls you back to FLOOR_Y and then hands you back to gravity.
--- This replaces the old auto-TP that hard-teleported (CFrame =) and zeroed AssemblyLinearVelocity;
--- no teleport, no raw velocity writes -- the constraint does all the moving.
-local AUTO_FLOOR = true          -- master toggle for the linear floor-drop
-local FLOOR_Y = -7               -- Y you get pulled down to (matches the old AUTO_TP_GROUND_Y)
-local FLOOR_TRIGGER_Y = 7        -- only engage once you're airborne above this Y
-local FLOOR_DROP_SPEED = 200     -- max downward studs/s while dropping (eases off near FLOOR_Y)
+-- LINEARIZE_FOREIGN (executor-only): a general "make it linear" transformer. Instead of hard-writing
+-- to your HRP, other scripts' movement is CAUGHT and reproduced through this script's LinearVelocity
+-- constraint. It doesn't know or care which script issued the move -- anything that writes HRP velocity
+-- or CFrame gets turned linear while this is on:
+--   * a raw velocity write (e.g. an anti-ragdoll's Velocity = 0)  -> reproduced as a linear velocity
+--   * a CFrame teleport (e.g. an auto-TP snapping you to the floor) -> reproduced as a fast linear glide
+-- So you don't rewrite those scripts; you point this at them and their motion comes out linear.
+-- Needs hookmetamethod + newcclosure.
+-- WARNING: while ON, LINEARIZE_TELEPORTS catches EVERY local HRP CFrame/Position write, including any
+-- legit ones, and turns them into glides. Leave teleports off if you only want velocity linearized.
+local LINEARIZE_FOREIGN = false  -- master toggle for the transformer
+local LINEARIZE_TELEPORTS = true -- also catch CFrame/Position teleports, not just velocity writes
+local LINEARIZE_SPEED = 200      -- max studs/s used when gliding to a caught teleport target
+local LINEARIZE_REACH = 1.5      -- a glide target counts as reached within this many studs
+local LINEARIZE_TTL = 0.15       -- how long a caught velocity command keeps driving (seconds)
 
 local humanoid: Humanoid? = nil
 local rootPart: BasePart? = nil
 local attachment: Attachment? = nil
 local moveLV: LinearVelocity? = nil
 local stepLV: LinearVelocity? = nil
-local dropLV: LinearVelocity? = nil
+local linLV: LinearVelocity? = nil
 local rayParams: RaycastParams? = nil
 
 local footOffset = 3
@@ -68,7 +75,10 @@ local knockUntil = 0
 local lastGlueTime = 0
 local lastGlueVy = 0
 local airFloorVX, airFloorVZ = 0, 0
-local dropping = false
+-- transformer state: the latest caught foreign motion, waiting to be replayed linearly
+local linVelTarget: Vector3? = nil   -- a caught velocity command to reproduce
+local linVelUntil = 0                -- how long that velocity command stays valid
+local linPosTarget: Vector3? = nil   -- a caught teleport target to glide to
 local charGen = 0
 
 local KNOCK_THRESHOLD = 50   -- horizontal speed over expected that counts as external knockback
@@ -79,7 +89,7 @@ local alive = true
 local function teardown()
 	if moveLV then moveLV:Destroy() moveLV = nil end
 	if stepLV then stepLV:Destroy() stepLV = nil end
-	if dropLV then dropLV:Destroy() dropLV = nil end
+	if linLV then linLV:Destroy() linLV = nil end
 	if attachment then attachment:Destroy() attachment = nil end
 end
 
@@ -90,7 +100,7 @@ end
 local function purgeOld(part: BasePart)
 	for _, c in ipairs(part:GetChildren()) do
 		local n = c.Name
-		if n == "LinearMoveAttachment" or n == "LinearMove" or n == "LinearJump" or n == "LinearStep" or n == "LinearDrop" then
+		if n == "LinearMoveAttachment" or n == "LinearMove" or n == "LinearJump" or n == "LinearStep" or n == "LinearForce" then
 			c:Destroy()
 		end
 	end
@@ -130,21 +140,21 @@ local function build()
 	step.Enabled = false
 	step.Parent = rootPart
 
-	local drop = Instance.new("LinearVelocity")
-	drop.Name = "LinearDrop"
-	drop.Attachment0 = att
-	drop.RelativeTo = Enum.ActuatorRelativeTo.World
-	drop.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
-	drop.LineDirection = Vector3.new(0, 1, 0)
-	drop.MaxForce = math.huge
-	drop.LineVelocity = 0
-	drop.Enabled = false
-	drop.Parent = rootPart
+	-- general-purpose 3D linearizer: reproduces caught foreign motion (velocity or teleport-glide)
+	local lin = Instance.new("LinearVelocity")
+	lin.Name = "LinearForce"
+	lin.Attachment0 = att
+	lin.RelativeTo = Enum.ActuatorRelativeTo.World
+	lin.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+	lin.VectorVelocity = Vector3.zero
+	lin.MaxForce = math.huge
+	lin.Enabled = false
+	lin.Parent = rootPart
 
 	attachment = att
 	moveLV = move
 	stepLV = step
-	dropLV = drop
+	linLV = lin
 end
 
 local function computeFootOffset(char: Model, hum: Humanoid, hrp: BasePart): number
@@ -184,7 +194,8 @@ local function onCharacterAdded(char: Model)
 	rayParams = params
 
 	stepping = false
-	dropping = false
+	linVelTarget = nil
+	linPosTarget = nil
 	jumpSuppressUntil = 0
 	knockUntil = 0
 	lastGlueTime = 0
@@ -278,7 +289,7 @@ local function detectStep(flat: Vector3, floorTopY: number, probe: number): numb
 	return top.Position.Y
 end
 
-local OURS = { LinearMove = true, LinearStep = true, LinearDrop = true, LinearMoveAttachment = true }
+local OURS = { LinearMove = true, LinearStep = true, LinearForce = true, LinearMoveAttachment = true }
 local function suppressForeign()
 	local hrp = rootPart
 	if not hrp then
@@ -299,44 +310,45 @@ local function stopStep()
 	end
 end
 
-local function stopDrop()
-	dropping = false
-	if dropLV and dropLV.Parent then
-		dropLV.Enabled = false
-		dropLV.LineVelocity = 0
+local function stopLinearize()
+	linVelTarget = nil
+	linPosTarget = nil
+	if linLV and linLV.Parent then
+		linLV.Enabled = false
+		linLV.VectorVelocity = Vector3.zero
 	end
 end
 
--- Linear replacement for the old auto-TP-down: instead of hard-teleporting to FLOOR_Y and zeroing
--- AssemblyLinearVelocity, drive a downward LinearVelocity that pulls you to FLOOR_Y, easing off as
--- you arrive, then hand back to gravity. Runs independently of the speed booster.
-local function updateAutoFloor()
-	local drop = dropLV
-	local hum = humanoid
+-- Replay whatever foreign motion the hook caught, through the constraint instead of a raw write.
+-- A caught teleport (linPosTarget) wins over a caught velocity: glide to it, ease near the target,
+-- then release back to normal physics. Otherwise reproduce the latest caught velocity for its TTL.
+local function updateLinearize()
+	local lin = linLV
 	local hrp = rootPart
-	if not AUTO_FLOOR or not drop or not drop.Parent or not hum or not hrp then
-		stopDrop()
+	local hum = humanoid
+	if not LINEARIZE_FOREIGN or not lin or not lin.Parent or not hrp then
+		stopLinearize()
 		return
 	end
-	-- never fight death or a ragdoll/knock; let those play out
-	if hum.Health <= 0 or isKnockedState() then
-		stopDrop()
+	if hum and hum.Health <= 0 then
+		stopLinearize()
 		return
 	end
-	local inAir = hum.FloorMaterial == Enum.Material.Air
-	if inAir and hrp.Position.Y >= FLOOR_TRIGGER_Y then
-		dropping = true
-	end
-	if dropping then
-		local dy = FLOOR_Y - hrp.Position.Y -- negative while you're above the floor
-		if not inAir or dy > -0.5 then
-			-- landed, or reached FLOOR_Y: stop driving and let normal physics take over
-			stopDrop()
+	local now = tick()
+	if linPosTarget then
+		local delta = linPosTarget - hrp.Position
+		if delta.Magnitude <= LINEARIZE_REACH then
+			stopLinearize() -- arrived: hand back to normal physics
 		else
-			-- ease the descent so you settle at FLOOR_Y instead of blasting through it
-			drop.LineVelocity = math.clamp(dy * 8, -FLOOR_DROP_SPEED, -4)
-			drop.Enabled = true
+			-- speed scales with distance and eases as you arrive, capped at LINEARIZE_SPEED
+			lin.VectorVelocity = delta.Unit * math.min(delta.Magnitude * 8, LINEARIZE_SPEED)
+			lin.Enabled = true
 		end
+	elseif linVelTarget and now < linVelUntil then
+		lin.VectorVelocity = linVelTarget
+		lin.Enabled = true
+	else
+		stopLinearize()
 	end
 end
 
@@ -369,8 +381,8 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 		hum.WalkSpeed = MASK_WALKSPEED
 	end
 
-	-- linear floor-drop runs on its own, independent of the speed booster below
-	updateAutoFloor()
+	-- the linearizer runs on its own, independent of the speed booster below
+	updateLinearize()
 
 	if hum.Health <= 0 or stateBlocksMovement() then
 		disableAll()
@@ -495,34 +507,51 @@ local function cleanup()
 	end
 	table.clear(connections)
 	stopStep()
-	stopDrop()
+	stopLinearize()
 	teardown()
 	_G.__LinearMovementCleanup = nil
 end
 _G.__LinearMovementCleanup = cleanup
 
-if (BLOCK_FOREIGN_VELOCITY or SUPPRESS_DURING_RAGDOLL) and hookmetamethod and newcclosure then
+if (BLOCK_FOREIGN_VELOCITY or SUPPRESS_DURING_RAGDOLL or LINEARIZE_FOREIGN) and hookmetamethod and newcclosure then
 	pcall(function()
 		local realNewindex
 		realNewindex = hookmetamethod(game, "__newindex", newcclosure(function(self, key, value)
-			if (key == "Velocity" or key == "AssemblyLinearVelocity") and self == rootPart and typeof(value) == "Vector3" then
-				-- While ragdolled/knocked, swallow ALL foreign velocity writes so the ragdoll plays
-				-- out naturally and the server doesn't kick you for moving while you're supposed to be
-				-- limp. This is the only window this branch touches -- walking/jumps aren't affected.
-				if SUPPRESS_DURING_RAGDOLL and isKnockedState() then
-					return
-				end
-				-- Optional: also swallow velocity writes on our HRP WHILE we're actively walking, so
-				-- another script's walk mover is replaced by ours (its TP/auto-grab still work).
-				if BLOCK_FOREIGN_VELOCITY then
-					local hum = humanoid
-					if hum and hum.MoveDirection.Magnitude > 0.01 then
-						-- only swallow horizontal (walk) overrides; let vertical writes (jumps) through
-						local cur = self[key]
-						if math.abs(value.Y - cur.Y) < 1 then
-							return
+			if self == rootPart then
+				if (key == "Velocity" or key == "AssemblyLinearVelocity") and typeof(value) == "Vector3" then
+					-- While ragdolled/knocked, swallow ALL foreign velocity writes so the ragdoll plays
+					-- out naturally and the server doesn't kick you for moving while you're supposed to be
+					-- limp. This is the only window this branch touches -- walking/jumps aren't affected.
+					if SUPPRESS_DURING_RAGDOLL and isKnockedState() then
+						return
+					end
+					-- Transformer: catch this velocity command and replay it through the constraint
+					-- (see updateLinearize) instead of letting it land as a raw physics write.
+					if LINEARIZE_FOREIGN then
+						linVelTarget = value
+						linVelUntil = tick() + LINEARIZE_TTL
+						return
+					end
+					-- Optional: also swallow velocity writes on our HRP WHILE we're actively walking, so
+					-- another script's walk mover is replaced by ours (its TP/auto-grab still work).
+					if BLOCK_FOREIGN_VELOCITY then
+						local hum = humanoid
+						if hum and hum.MoveDirection.Magnitude > 0.01 then
+							-- only swallow horizontal (walk) overrides; let vertical writes (jumps) through
+							local cur = self[key]
+							if math.abs(value.Y - cur.Y) < 1 then
+								return
+							end
 						end
 					end
+				elseif LINEARIZE_FOREIGN and LINEARIZE_TELEPORTS and key == "CFrame" and typeof(value) == "CFrame" then
+					-- Transformer: catch a teleport and glide to its target through the constraint
+					-- instead of letting the CFrame snap you there.
+					linPosTarget = value.Position
+					return
+				elseif LINEARIZE_FOREIGN and LINEARIZE_TELEPORTS and key == "Position" and typeof(value) == "Vector3" then
+					linPosTarget = value
+					return
 				end
 			end
 			return realNewindex(self, key, value)
