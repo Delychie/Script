@@ -38,7 +38,13 @@ local stepping = false
 local stepTargetY = 0
 local stepDeadline = 0
 local jumpSuppressUntil = 0
+local knockUntil = 0
+local lastGlueTime = 0
+local lastGlueVy = 0
 local airFloorVX, airFloorVZ = 0, 0
+local charGen = 0
+
+local KNOCK_THRESHOLD = 50   -- horizontal speed over expected that counts as external knockback
 
 local connections: { RBXScriptConnection } = {}
 local alive = true
@@ -115,12 +121,14 @@ local function computeFootOffset(char: Model, hum: Humanoid, hrp: BasePart): num
 end
 
 local function onCharacterAdded(char: Model)
+	charGen += 1
+	local myGen = charGen
 	local hum = char:WaitForChild("Humanoid") :: Humanoid
-	if not alive or not hum then
+	if not alive or myGen ~= charGen or not hum then
 		return
 	end
 	local hrp = char:WaitForChild("HumanoidRootPart") :: BasePart
-	if not alive or not hrp then
+	if not alive or myGen ~= charGen or not hrp then
 		return
 	end
 	humanoid = hum
@@ -137,7 +145,17 @@ local function onCharacterAdded(char: Model)
 
 	stepping = false
 	jumpSuppressUntil = 0
+	knockUntil = 0
+	lastGlueTime = 0
 	airFloorVX, airFloorVZ = 0, 0
+
+	-- also suppress step-assist on programmatic jumps (not just JumpRequest input)
+	table.insert(connections, hum.StateChanged:Connect(function(_, new)
+		if new == Enum.HumanoidStateType.Jumping then
+			jumpSuppressUntil = tick() + 0.25
+			stopStep()
+		end
+	end))
 end
 
 local function stateBlocksMovement(): boolean
@@ -218,6 +236,7 @@ local function disableAll()
 		moveLV.Enabled = false
 		moveLV.PlaneVelocity = Vector2.zero
 	end
+	airFloorVX, airFloorVZ = 0, 0
 	stopStep()
 end
 
@@ -259,41 +278,54 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	local flat = moving and Vector3.new(dir.X, 0, dir.Z).Unit or Vector3.zero
 	local liftCap = math.max(STEP_UP_SPEED, effectiveSpeed)
 
-	-- vertical control: step-assist (climb ledges) and slope-glue (hug ramps), via stepLV
-	if tick() < jumpSuppressUntil or not moving or not grounded then
+	-- vertical control via stepLV: step-assist (climb ledges) + slope-glue (hug ramps).
+	-- an in-progress step is NOT gated on grounded (it lifts you off the ground by design).
+	local now = tick()
+	if now < jumpSuppressUntil or not moving then
 		stopStep()
 	elseif stepping then
 		local nowFy = feetY()
-		if nowFy == nil or nowFy >= stepTargetY - 0.1 or tick() > stepDeadline then
+		if nowFy == nil or nowFy >= stepTargetY - 0.1 or now > stepDeadline then
 			stopStep()
 		elseif stepLV and stepLV.Parent then
-			stepLV.LineVelocity = math.clamp((stepTargetY - nowFy) * 10, 2, liftCap)
+			stepLV.LineVelocity = math.clamp((stepTargetY - nowFy) * 20, 4, liftCap)
 			stepLV.Enabled = true
 		end
-	else
-		local started = false
+	elseif grounded then
+		local handled = false
 		if STEP_ASSIST and floorTopY and fy then
 			local topY = detectStep(flat, floorTopY, STEP_PROBE + effectiveSpeed * 0.04)
 			if topY and (topY - fy) > 0.25 and stepLV and stepLV.Parent then
 				stepping = true
 				stepTargetY = topY
-				stepDeadline = tick() + 0.6
-				stepLV.LineVelocity = math.clamp((topY - fy) * 10, 2, liftCap)
+				stepDeadline = now + 0.6
+				stepLV.LineVelocity = math.clamp((topY - fy) * 20, 4, liftCap)
 				stepLV.Enabled = true
-				started = true
+				handled = true
 			end
 		end
-		if not started then
-			if SLOPE_GLUE and floorNormal and floorNormal.Y > 0.3 and floorNormal.Y < 0.98 and stepLV and stepLV.Parent then
+		if not handled and stepLV and stepLV.Parent then
+			if SLOPE_GLUE and floorNormal and floorNormal.Y > 0.1 and floorNormal.Y < 0.999 then
+				-- hug the slope: drive Y so velocity stays tangent to the surface (up or down)
 				local vhx = dir.X * effectiveSpeed
 				local vhz = dir.Z * effectiveSpeed
 				local vy = -(vhx * floorNormal.X + vhz * floorNormal.Z) / floorNormal.Y
-				stepLV.LineVelocity = math.clamp(vy, -(effectiveSpeed * 2 + 5), effectiveSpeed * 2 + 5)
+				local cap = effectiveSpeed * 3.5 + 5
+				vy = math.clamp(vy, -cap, cap)
+				stepLV.LineVelocity = vy
+				stepLV.Enabled = true
+				lastGlueTime = now
+				lastGlueVy = vy
+			elseif lastGlueVy > 0 and now - lastGlueTime < 0.2 then
+				-- just crested from an upslope onto flat: bleed the residual upward velocity so you don't launch
+				stepLV.LineVelocity = 0
 				stepLV.Enabled = true
 			else
 				stopStep()
 			end
 		end
+	else
+		stopStep()
 	end
 
 	-- inherit the floor's motion so moving platforms carry you; decays after you leave one
@@ -315,7 +347,19 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	local baseVX = grounded and fvx or airFloorVX
 	local baseVZ = grounded and fvz or airFloorVZ
 
-	if moving and (grounded or AIR_CONTROL or stepping) then
+	-- let external knockback/impulses through: if we're moving much faster horizontally than we
+	-- asked for, something is shoving us, so back off the constraint briefly and let it play out.
+	local av = hrp.AssemblyLinearVelocity
+	local hspeed = Vector3.new(av.X, 0, av.Z).Magnitude
+	local expected = effectiveSpeed + Vector2.new(baseVX, baseVZ).Magnitude
+	if hspeed > expected + KNOCK_THRESHOLD then
+		knockUntil = now + 0.3
+	end
+
+	if now < knockUntil then
+		move.Enabled = false
+		move.PlaneVelocity = Vector2.zero
+	elseif moving and (grounded or AIR_CONTROL or stepping) then
 		move.PlaneVelocity = Vector2.new(dir.X * effectiveSpeed + baseVX, dir.Z * effectiveSpeed + baseVZ)
 		move.Enabled = true
 	else
