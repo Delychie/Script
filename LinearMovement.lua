@@ -14,8 +14,8 @@ local player = Players.LocalPlayer
 
 -- Speed: effective = SPEED_FIXED (if > 0) else the game's current WalkSpeed * SPEED_MULT.
 -- Multiply mode respects carry slow-downs / boosts and never fights the game's rooting.
-local SPEED_MULT = 1        -- multiplier on the game's live WalkSpeed (1 = vanilla speed; raise it to go faster)
-local SPEED_FIXED = 0       -- if > 0, move at exactly this speed instead of multiplying
+local SPEED_MULT = 1        -- multiplier on the game's live WalkSpeed (only used when SPEED_FIXED = 0)
+local SPEED_FIXED = 50      -- your real move speed, driven by the linear constraint (tune to taste)
 
 local AIR_CONTROL = true    -- steer while airborne (only matters while boosting)
 -- Dominance: force other scripts' movement off so only this one moves you.
@@ -24,7 +24,7 @@ local AIR_CONTROL = true    -- steer while airborne (only matters while boosting
 -- pair it with SPEED_FIXED for your real speed. NOTE: neither can hide a raw AssemblyLinearVelocity
 -- write or beat a server displacement check - for those, disable the other script's mover instead.
 local SUPPRESS_OTHER = false
-local MASK_WALKSPEED = 0
+local MASK_WALKSPEED = 16   -- pin Humanoid.WalkSpeed to this (looks default); real speed comes from SPEED_FIXED. Set to your game's normal WalkSpeed.
 -- Executor-only: no-op ANY Lua write to Velocity / AssemblyLinearVelocity on your HRP, so other
 -- scripts (e.g. del hub) that move you by writing velocity are neutralised and only this constraint
 -- moves you. Needs hookmetamethod + newcclosure. Read the caveats before enabling it.
