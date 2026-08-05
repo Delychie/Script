@@ -18,6 +18,12 @@ local SPEED_MULT = 1        -- multiplier on the game's live WalkSpeed (default 
 local SPEED_FIXED = 0       -- 0 = not fixed; speed follows the game (WalkSpeed * SPEED_MULT). Set > 0 only to hard-lock a speed.
 
 local AIR_CONTROL = true    -- steer while airborne (only matters while boosting)
+-- CARRY_SAFE: whenever the game slows you below your normal speed -- carrying something, a debuff,
+-- any deliberate slow-down -- stand fully down. No boost, no linearizing, no constraints: pure
+-- vanilla movement. The game slowing you is the game telling you how fast you may go, and moving
+-- faster than that while carrying is precisely what a carry check looks for. Leave this ON.
+local CARRY_SAFE = true
+local CARRY_SLOW_MARGIN = 0.5 -- studs/s below your observed normal speed that counts as "slowed"
 -- Dominance: force other scripts' movement off so only this one moves you.
 -- SUPPRESS_OTHER wipes foreign BodyVelocity/LinearVelocity/etc off your HRP each frame.
 -- MASK_WALKSPEED (>0) pins WalkSpeed to that value so other scripts' WalkSpeed spikes are hidden;
@@ -113,6 +119,7 @@ local knockUntil = 0
 local lastGlueTime = 0
 local lastGlueVy = 0
 local airFloorVX, airFloorVZ = 0, 0
+local baseWalkSpeed = 0   -- the fastest WalkSpeed this life; anything under it means the game slowed you
 -- transformer state: the latest caught foreign motion, normalized into one intent record
 local linKind: string? = nil         -- "Set" | "Damp" | "Impulse" | "Teleport"
 local linVec = Vector3.zero          -- the velocity that intent wants (or the momentum being bled)
@@ -364,6 +371,7 @@ local function onCharacterAdded(char: Model)
 	knockUntil = 0
 	lastGlueTime = 0
 	airFloorVX, airFloorVZ = 0, 0
+	baseWalkSpeed = hum.WalkSpeed
 
 	-- also suppress step-assist on programmatic jumps (not just JumpRequest input)
 	table.insert(connections, hum.StateChanged:Connect(function(_, new)
@@ -799,14 +807,34 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 		hum.WalkSpeed = MASK_WALKSPEED
 	end
 
-	-- the linearizer runs on its own, independent of the speed booster below
-	updateLinearize()
+	-- Track the fastest speed the game has given you this life. A drop below it means the game
+	-- deliberately slowed you -- carrying something, a debuff, a zone. Note this is read BEFORE any
+	-- standdown so the baseline keeps updating while slowed.
+	if hum.WalkSpeed > baseWalkSpeed then
+		baseWalkSpeed = hum.WalkSpeed
+	end
+	local slowed = CARRY_SAFE and baseWalkSpeed > 0 and hum.WalkSpeed < baseWalkSpeed - CARRY_SLOW_MARGIN
+
+	-- Diagnostics run before any standdown, so a carry window is still observable -- that window is
+	-- usually the one worth reading.
 	auditVelocity()
-	-- batch the log to disk on a timer so a lost session still leaves the last seconds on record
 	if LOG_TO_FILE and tick() >= logNextFlush then
 		logNextFlush = tick() + LOG_FLUSH_EVERY
 		flushLog()
 	end
+
+	if slowed then
+		-- Full standdown. The game slowing you is the game stating your speed limit; exceeding it
+		-- while carrying is exactly the mismatch a carry check is looking for. Hand everything back
+		-- to vanilla movement until the slow-down lifts.
+		linLog("carry", ("slowed: ws=%.1f base=%.1f -> standing down"):format(hum.WalkSpeed, baseWalkSpeed))
+		disableAll()
+		stopLinearize()
+		return
+	end
+
+	-- the linearizer runs on its own, independent of the speed booster below
+	updateLinearize()
 
 	if hum.Health <= 0 or stateBlocksMovement() then
 		disableAll()
@@ -1011,7 +1039,11 @@ end
 -- visible to __newindex -- a script using :ApplyImpulse() or :PivotTo() would move you raw no matter
 -- what the property hook did. Impulses are converted to the velocity change they represent
 -- (impulse / mass) so they can be reproduced as a decaying Impulse intent.
-if (LINEARIZE_METHODS or LINEARIZE_DEBUG) and hookmetamethod and newcclosure and getnamecallmethod then
+-- Only install this if it will actually do something. A __namecall hook runs on EVERY method call in
+-- the game, so installing it while conversion is off buys nothing and costs a pcall plus a lookup on
+-- every call -- enough to matter in a game with heavy remote traffic.
+if (LINEARIZE_FOREIGN and LINEARIZE_METHODS or LINEARIZE_DEBUG)
+	and hookmetamethod and newcclosure and getnamecallmethod then
 	pcall(function()
 		local realNamecall
 		realNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
