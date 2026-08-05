@@ -52,18 +52,36 @@ local FLOOR_VEL_DEADZONE = 0.25
 -- Needs hookmetamethod + newcclosure.
 -- WARNING: while ON, LINEARIZE_TELEPORTS catches EVERY local HRP CFrame/Position write, including any
 -- legit ones, and turns them into glides. Leave teleports off if you only want velocity linearized.
+-- Caught motion is classified by INTENT, because the same write means different things:
+--   Set      (Velocity = v, v ~= 0) -> drive v briefly, then release to physics
+--   Damp     (Velocity = 0)         -> ONE-SHOT BRAKE that bleeds momentum, never a sustained hold
+--   Impulse  (a knock/launch)       -> reproduce with a decay curve so it settles naturally
+--   Teleport (CFrame/Position =)    -> glide to the target, easing in
+-- Damp is why zeroing writes don't freeze you: an anti-ragdoll that writes Velocity = 0 every frame
+-- is asking you to stop, not asking to be pinned in mid-air.
 local LINEARIZE_FOREIGN = false  -- master toggle for the transformer
 local LINEARIZE_TELEPORTS = true -- also catch CFrame/Position teleports, not just velocity writes
+local LINEARIZE_RAGDOLL = true   -- linearize while knocked too, instead of dropping the writes
+local LINEARIZE_ANGULAR = true   -- reproduce spin/tumble (RotVelocity) as well as travel
+local LINEARIZE_GRAVITY = true   -- leave the Y axis to gravity unless an intent really is vertical
 local LINEARIZE_SPEED = 200      -- max studs/s used when gliding to a caught teleport target
 local LINEARIZE_REACH = 1.5      -- a glide target counts as reached within this many studs
-local LINEARIZE_TTL = 0.15       -- how long a caught velocity command keeps driving (seconds)
+local LINEARIZE_TTL = 0.15       -- how long a caught Set keeps driving (seconds)
+local LINEARIZE_DAMP_TIME = 0.12 -- how long a Damp takes to bleed momentum to zero (seconds)
+local LINEARIZE_DECAY = 2.5      -- decay rate for Impulse intents (higher = settles sooner)
+local LINEARIZE_FORCE = 50000    -- finite force; math.huge snaps hard and reads as teleport-y
+-- Diagnostics: log every caught channel WITHOUT converting anything, so you can see what a given
+-- game/script actually does to you (and how it ragdolls) before you turn conversion on.
+local LINEARIZE_DEBUG = false
 
 local humanoid: Humanoid? = nil
 local rootPart: BasePart? = nil
 local attachment: Attachment? = nil
 local moveLV: LinearVelocity? = nil
 local stepLV: LinearVelocity? = nil
-local linLV: LinearVelocity? = nil
+local linLV: LinearVelocity? = nil     -- horizontal (XZ plane) reproduction
+local linYLV: LinearVelocity? = nil    -- vertical (Y line), only when an intent is truly vertical
+local linAV: AngularVelocity? = nil    -- spin/tumble reproduction
 local rayParams: RaycastParams? = nil
 
 local footOffset = 3
@@ -75,11 +93,18 @@ local knockUntil = 0
 local lastGlueTime = 0
 local lastGlueVy = 0
 local airFloorVX, airFloorVZ = 0, 0
--- transformer state: the latest caught foreign motion, waiting to be replayed linearly
-local linVelTarget: Vector3? = nil   -- a caught velocity command to reproduce
-local linVelUntil = 0                -- how long that velocity command stays valid
+-- transformer state: the latest caught foreign motion, normalized into one intent record
+local linKind: string? = nil         -- "Set" | "Damp" | "Impulse" | "Teleport"
+local linVec = Vector3.zero          -- the velocity that intent wants (or the momentum being bled)
+local linUntil = 0                   -- when this intent expires and we hand back to physics
+local linStart = 0                   -- when it began (used to shape the Damp/Impulse curve)
 local linPosTarget: Vector3? = nil   -- a caught teleport target to glide to
+local linAngVec = Vector3.zero       -- caught angular velocity to reproduce
+local linAngUntil = 0
 local charGen = 0
+
+-- forward declarations: these are defined further down but referenced from onCharacterAdded above them
+local noteIntent, noteAngular, logAssemblies
 
 local KNOCK_THRESHOLD = 50   -- horizontal speed over expected that counts as external knockback
 
@@ -90,6 +115,8 @@ local function teardown()
 	if moveLV then moveLV:Destroy() moveLV = nil end
 	if stepLV then stepLV:Destroy() stepLV = nil end
 	if linLV then linLV:Destroy() linLV = nil end
+	if linYLV then linYLV:Destroy() linYLV = nil end
+	if linAV then linAV:Destroy() linAV = nil end
 	if attachment then attachment:Destroy() attachment = nil end
 end
 
@@ -100,7 +127,8 @@ end
 local function purgeOld(part: BasePart)
 	for _, c in ipairs(part:GetChildren()) do
 		local n = c.Name
-		if n == "LinearMoveAttachment" or n == "LinearMove" or n == "LinearJump" or n == "LinearStep" or n == "LinearForce" then
+		if n == "LinearMoveAttachment" or n == "LinearMove" or n == "LinearJump" or n == "LinearStep"
+			or n == "LinearForce" or n == "LinearForceY" or n == "LinearSpin" then
 			c:Destroy()
 		end
 	end
@@ -140,21 +168,48 @@ local function build()
 	step.Enabled = false
 	step.Parent = rootPart
 
-	-- general-purpose 3D linearizer: reproduces caught foreign motion (velocity or teleport-glide)
+	-- Linearizer, split by axis so gravity survives: horizontal goes through a Plane (XZ) constraint
+	-- and vertical through a separate Line (Y) constraint that only switches on for genuinely
+	-- vertical intents. A single Vector-mode constraint would drive all three axes and make you float.
 	local lin = Instance.new("LinearVelocity")
 	lin.Name = "LinearForce"
 	lin.Attachment0 = att
 	lin.RelativeTo = Enum.ActuatorRelativeTo.World
-	lin.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
-	lin.VectorVelocity = Vector3.zero
-	lin.MaxForce = math.huge
+	lin.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
+	lin.PrimaryTangentAxis = Vector3.new(1, 0, 0)
+	lin.SecondaryTangentAxis = Vector3.new(0, 0, 1)
+	lin.MaxForce = LINEARIZE_FORCE
+	lin.PlaneVelocity = Vector2.zero
 	lin.Enabled = false
 	lin.Parent = rootPart
+
+	local linY = Instance.new("LinearVelocity")
+	linY.Name = "LinearForceY"
+	linY.Attachment0 = att
+	linY.RelativeTo = Enum.ActuatorRelativeTo.World
+	linY.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
+	linY.LineDirection = Vector3.new(0, 1, 0)
+	linY.MaxForce = LINEARIZE_FORCE
+	linY.LineVelocity = 0
+	linY.Enabled = false
+	linY.Parent = rootPart
+
+	-- ragdolls tumble; without this a knock travels linearly but never rotates, which looks wrong
+	local spin = Instance.new("AngularVelocity")
+	spin.Name = "LinearSpin"
+	spin.Attachment0 = att
+	spin.RelativeTo = Enum.ActuatorRelativeTo.World
+	spin.AngularVelocity = Vector3.zero
+	spin.MaxTorque = LINEARIZE_FORCE
+	spin.Enabled = false
+	spin.Parent = rootPart
 
 	attachment = att
 	moveLV = move
 	stepLV = step
 	linLV = lin
+	linYLV = linY
+	linAV = spin
 end
 
 local function computeFootOffset(char: Model, hum: Humanoid, hrp: BasePart): number
@@ -194,8 +249,11 @@ local function onCharacterAdded(char: Model)
 	rayParams = params
 
 	stepping = false
-	linVelTarget = nil
+	linKind = nil
 	linPosTarget = nil
+	linVec = Vector3.zero
+	linAngVec = Vector3.zero
+	linAngUntil = 0
 	jumpSuppressUntil = 0
 	knockUntil = 0
 	lastGlueTime = 0
@@ -206,6 +264,32 @@ local function onCharacterAdded(char: Model)
 		if new == Enum.HumanoidStateType.Jumping then
 			jumpSuppressUntil = tick() + 0.25
 			stopStep()
+		end
+	end))
+
+	-- Knock takeover: the moment you get ragdolled, sample the momentum the hit gave you and hand it
+	-- to the constraint as an Impulse. From frame one the flight arc is constraint-driven rather than
+	-- raw physics, which is the whole point -- getting knocked should come out linear too.
+	table.insert(connections, hum.StateChanged:Connect(function(_, new)
+		local knocked = new == Enum.HumanoidStateType.Ragdoll
+			or new == Enum.HumanoidStateType.Physics
+			or new == Enum.HumanoidStateType.FallingDown
+			or new == Enum.HumanoidStateType.PlatformStanding
+		if not knocked then
+			return
+		end
+		logAssemblies(tostring(new))
+		if not LINEARIZE_FOREIGN or not LINEARIZE_RAGDOLL or LINEARIZE_DEBUG then
+			return
+		end
+		local hrpNow = rootPart
+		if not hrpNow then
+			return
+		end
+		noteIntent("Impulse", hrpNow.AssemblyLinearVelocity)
+		if LINEARIZE_ANGULAR then
+			noteAngular(hrpNow.AssemblyAngularVelocity)
+			linAngUntil = tick() + 1.0 -- a tumble outlasts a single TTL
 		end
 	end))
 end
@@ -289,7 +373,10 @@ local function detectStep(flat: Vector3, floorTopY: number, probe: number): numb
 	return top.Position.Y
 end
 
-local OURS = { LinearMove = true, LinearStep = true, LinearForce = true, LinearMoveAttachment = true }
+local OURS = {
+	LinearMove = true, LinearStep = true, LinearForce = true,
+	LinearForceY = true, LinearSpin = true, LinearMoveAttachment = true,
+}
 local function suppressForeign()
 	local hrp = rootPart
 	if not hrp then
@@ -310,23 +397,122 @@ local function stopStep()
 	end
 end
 
+-- Diagnostics. With LINEARIZE_DEBUG on, nothing is converted -- every catch is just reported, so you
+-- can learn what a given game actually does to you (which properties, from which script) before
+-- trusting the transformer with it.
+local function linLog(channel: string, detail: string)
+	if not LINEARIZE_DEBUG then
+		return
+	end
+	local src = "?"
+	if getcallingscript then
+		local ok, s = pcall(getcallingscript)
+		if ok and s then
+			local ok2, full = pcall(function() return s:GetFullName() end)
+			src = (ok2 and full) or tostring(s)
+		end
+	end
+	print(("[LinearMovement] %s | %s | src=%s"):format(channel, detail, src))
+end
+
+-- Answers the "how does this game ragdoll me?" question: if a knock splits the character into several
+-- assemblies (Motor6Ds swapped for BallSocketConstraints), one constraint on the HRP only drives the
+-- torso and the limbs flop free. Logged on each knock while debugging.
+function logAssemblies(tag: string)
+	if not LINEARIZE_DEBUG then
+		return
+	end
+	local hrp = rootPart
+	local char = hrp and hrp.Parent
+	if not hrp or not char then
+		return
+	end
+	local roots, n = {}, 0
+	for _, d in ipairs(char:GetDescendants()) do
+		if d:IsA("BasePart") then
+			local ok, root = pcall(function() return d.AssemblyRootPart end)
+			if ok and root and not roots[root] then
+				roots[root] = true
+				n += 1
+			end
+		end
+	end
+	linLog("assembly/" .. tag, ("assemblies=%d hrpRoot=%s"):format(n, tostring(hrp.AssemblyRootPart)))
+end
+
 local function stopLinearize()
-	linVelTarget = nil
+	linKind = nil
 	linPosTarget = nil
+	linVec = Vector3.zero
+	linAngVec = Vector3.zero
+	linAngUntil = 0
 	if linLV and linLV.Parent then
 		linLV.Enabled = false
-		linLV.VectorVelocity = Vector3.zero
+		linLV.PlaneVelocity = Vector2.zero
+	end
+	if linYLV and linYLV.Parent then
+		linYLV.Enabled = false
+		linYLV.LineVelocity = 0
+	end
+	if linAV and linAV.Parent then
+		linAV.Enabled = false
+		linAV.AngularVelocity = Vector3.zero
 	end
 end
 
--- Replay whatever foreign motion the hook caught, through the constraint instead of a raw write.
--- A caught teleport (linPosTarget) wins over a caught velocity: glide to it, ease near the target,
--- then release back to normal physics. Otherwise reproduce the latest caught velocity for its TTL.
+-- Record a caught intent. Classification happens here so every catch site stays dumb.
+function noteIntent(kind: string, vec: Vector3)
+	local now = tick()
+	linKind = kind
+	linStart = now
+	if kind == "Damp" then
+		-- bleed the momentum you ACTUALLY have; "stop" is a brake, not a position hold
+		local hrp = rootPart
+		linVec = hrp and hrp.AssemblyLinearVelocity or Vector3.zero
+		linUntil = now + LINEARIZE_DAMP_TIME
+	elseif kind == "Impulse" then
+		linVec = vec
+		linUntil = now + 1.5 -- decay curve ends it early in practice
+	else
+		linVec = vec
+		linUntil = now + LINEARIZE_TTL
+	end
+end
+
+function noteAngular(vec: Vector3)
+	if not LINEARIZE_ANGULAR then
+		return
+	end
+	linAngVec = vec
+	linAngUntil = tick() + LINEARIZE_TTL
+end
+
+-- Drive the constraints from the current intent. Horizontal always goes through the plane
+-- constraint; the Y constraint only engages when the intent is genuinely vertical (or when
+-- LINEARIZE_GRAVITY is off), so you keep falling normally instead of hanging in the air.
+local function applyLinear(vec: Vector3)
+	local lin, linY = linLV, linYLV
+	if lin and lin.Parent then
+		lin.PlaneVelocity = Vector2.new(vec.X, vec.Z)
+		lin.Enabled = true
+	end
+	if linY and linY.Parent then
+		if not LINEARIZE_GRAVITY or math.abs(vec.Y) > 0.5 then
+			linY.LineVelocity = vec.Y
+			linY.Enabled = true
+		else
+			linY.Enabled = false
+			linY.LineVelocity = 0
+		end
+	end
+end
+
+-- Replay whatever foreign motion the hook caught, through the constraints instead of a raw write.
+-- Priority: a caught teleport outranks a velocity intent, since it is a destination, not a rate.
 local function updateLinearize()
-	local lin = linLV
 	local hrp = rootPart
 	local hum = humanoid
-	if not LINEARIZE_FOREIGN or not lin or not lin.Parent or not hrp then
+	if not LINEARIZE_FOREIGN or LINEARIZE_DEBUG or not linLV or not linLV.Parent or not hrp then
 		stopLinearize()
 		return
 	end
@@ -335,20 +521,58 @@ local function updateLinearize()
 		return
 	end
 	local now = tick()
+
+	-- spin decays on its own clock so a tumble can outlive the travel intent
+	if linAV and linAV.Parent then
+		if LINEARIZE_ANGULAR and now < linAngUntil then
+			linAV.AngularVelocity = linAngVec
+			linAV.Enabled = true
+		else
+			linAV.Enabled = false
+			linAV.AngularVelocity = Vector3.zero
+		end
+	end
+
 	if linPosTarget then
 		local delta = linPosTarget - hrp.Position
 		if delta.Magnitude <= LINEARIZE_REACH then
 			stopLinearize() -- arrived: hand back to normal physics
 		else
 			-- speed scales with distance and eases as you arrive, capped at LINEARIZE_SPEED
-			lin.VectorVelocity = delta.Unit * math.min(delta.Magnitude * 8, LINEARIZE_SPEED)
-			lin.Enabled = true
+			local v = delta.Unit * math.min(delta.Magnitude * 8, LINEARIZE_SPEED)
+			-- a teleport IS a vertical command, so drive Y regardless of the gravity preference
+			if linLV and linLV.Parent then
+				linLV.PlaneVelocity = Vector2.new(v.X, v.Z)
+				linLV.Enabled = true
+			end
+			if linYLV and linYLV.Parent then
+				linYLV.LineVelocity = v.Y
+				linYLV.Enabled = true
+			end
 		end
-	elseif linVelTarget and now < linVelUntil then
-		lin.VectorVelocity = linVelTarget
-		lin.Enabled = true
-	else
+		return
+	end
+
+	if not linKind or now >= linUntil then
 		stopLinearize()
+		return
+	end
+
+	local elapsed = now - linStart
+	if linKind == "Damp" then
+		-- ramp the captured momentum down to zero across LINEARIZE_DAMP_TIME, then release
+		local t = math.clamp(1 - elapsed / LINEARIZE_DAMP_TIME, 0, 1)
+		applyLinear(linVec * t)
+	elseif linKind == "Impulse" then
+		-- exponential settle so a knock lands naturally instead of cutting off at a TTL
+		local decay = math.exp(-LINEARIZE_DECAY * elapsed)
+		if decay < 0.05 then
+			stopLinearize()
+		else
+			applyLinear(linVec * decay)
+		end
+	else -- "Set"
+		applyLinear(linVec)
 	end
 end
 
@@ -513,23 +737,28 @@ local function cleanup()
 end
 _G.__LinearMovementCleanup = cleanup
 
-if (BLOCK_FOREIGN_VELOCITY or SUPPRESS_DURING_RAGDOLL or LINEARIZE_FOREIGN) and hookmetamethod and newcclosure then
+if (BLOCK_FOREIGN_VELOCITY or SUPPRESS_DURING_RAGDOLL or LINEARIZE_FOREIGN or LINEARIZE_DEBUG)
+	and hookmetamethod and newcclosure then
 	pcall(function()
 		local realNewindex
 		realNewindex = hookmetamethod(game, "__newindex", newcclosure(function(self, key, value)
 			if self == rootPart then
 				if (key == "Velocity" or key == "AssemblyLinearVelocity") and typeof(value) == "Vector3" then
-					-- While ragdolled/knocked, swallow ALL foreign velocity writes so the ragdoll plays
-					-- out naturally and the server doesn't kick you for moving while you're supposed to be
-					-- limp. This is the only window this branch touches -- walking/jumps aren't affected.
-					if SUPPRESS_DURING_RAGDOLL and isKnockedState() then
+					local knocked = isKnockedState()
+					linLog("velocity", ("%s=%s knocked=%s"):format(key, tostring(value), tostring(knocked)))
+					-- Transformer FIRST: a caught write becomes an intent and is replayed through the
+					-- constraints. This deliberately runs before the ragdoll-suppress branch below, so
+					-- getting knocked comes out linear instead of the write landing as raw velocity.
+					-- A zero write is a Damp (brake), not a Set -- otherwise a script that zeroes every
+					-- frame would pin you in mid-air.
+					if LINEARIZE_FOREIGN and not LINEARIZE_DEBUG and (not knocked or LINEARIZE_RAGDOLL) then
+						noteIntent(value.Magnitude < 0.05 and "Damp" or "Set", value)
 						return
 					end
-					-- Transformer: catch this velocity command and replay it through the constraint
-					-- (see updateLinearize) instead of letting it land as a raw physics write.
-					if LINEARIZE_FOREIGN then
-						linVelTarget = value
-						linVelUntil = tick() + LINEARIZE_TTL
+					-- Fallback when the transformer is off (or is set to stay out of knocks): swallow
+					-- foreign velocity writes while limp so the ragdoll plays out and the server doesn't
+					-- kick you for moving. Walking/jumps aren't affected.
+					if SUPPRESS_DURING_RAGDOLL and knocked then
 						return
 					end
 					-- Optional: also swallow velocity writes on our HRP WHILE we're actively walking, so
@@ -544,14 +773,26 @@ if (BLOCK_FOREIGN_VELOCITY or SUPPRESS_DURING_RAGDOLL or LINEARIZE_FOREIGN) and 
 							end
 						end
 					end
-				elseif LINEARIZE_FOREIGN and LINEARIZE_TELEPORTS and key == "CFrame" and typeof(value) == "CFrame" then
-					-- Transformer: catch a teleport and glide to its target through the constraint
+				elseif (key == "RotVelocity" or key == "AssemblyAngularVelocity") and typeof(value) == "Vector3" then
+					linLog("angular", ("%s=%s"):format(key, tostring(value)))
+					if LINEARIZE_FOREIGN and LINEARIZE_ANGULAR and not LINEARIZE_DEBUG then
+						noteAngular(value)
+						return
+					end
+				elseif key == "CFrame" and typeof(value) == "CFrame" then
+					linLog("teleport", "CFrame=" .. tostring(value.Position))
+					-- Transformer: catch a teleport and glide to its target through the constraints
 					-- instead of letting the CFrame snap you there.
-					linPosTarget = value.Position
-					return
-				elseif LINEARIZE_FOREIGN and LINEARIZE_TELEPORTS and key == "Position" and typeof(value) == "Vector3" then
-					linPosTarget = value
-					return
+					if LINEARIZE_FOREIGN and LINEARIZE_TELEPORTS and not LINEARIZE_DEBUG then
+						linPosTarget = value.Position
+						return
+					end
+				elseif key == "Position" and typeof(value) == "Vector3" then
+					linLog("teleport", "Position=" .. tostring(value))
+					if LINEARIZE_FOREIGN and LINEARIZE_TELEPORTS and not LINEARIZE_DEBUG then
+						linPosTarget = value
+						return
+					end
 				end
 			end
 			return realNewindex(self, key, value)
