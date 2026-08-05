@@ -84,6 +84,15 @@ local LINEARIZE_DEBUG = false
 local LINEARIZE_AUDIT = false
 local AUDIT_TOLERANCE = 12       -- studs/s of unexplained change before it gets reported
 local AUDIT_COOLDOWN = 0.5       -- min seconds between reports, so the log stays readable
+-- Logging. The property hook runs on EVERY write in the game, so logging is throttled per channel --
+-- unthrottled printing is enough to stall the client on its own. Repeats are counted, not printed.
+local LOG_THROTTLE = 0.75        -- min seconds between log lines for the same channel
+-- Persist the log to a file so it survives losing the session. Without this, anything logged in the
+-- last moments before a disconnect is gone with the output window, which is exactly the window you
+-- care about when something ends your session abruptly. Needs an executor with writefile/appendfile.
+local LOG_TO_FILE = false
+local LOG_FILE = "LinearMovement_log.txt"
+local LOG_FLUSH_EVERY = 0.5      -- seconds between file writes (batched; never write per-event)
 
 local humanoid: Humanoid? = nil
 local rootPart: BasePart? = nil
@@ -121,6 +130,11 @@ local ourParts: { [Instance]: boolean } = {}
 local auditLastVel = Vector3.zero
 local auditLastCmd = Vector3.zero
 local auditLastReport = 0
+-- logging state: throttle bookkeeping plus a buffer that is batched out to disk
+local logLast: { [string]: number } = {}
+local logSkipped: { [string]: number } = {}
+local logBuf: { string } = {}
+local logNextFlush = 0
 
 -- forward declarations: these are defined further down but referenced from onCharacterAdded above them
 local noteIntent, noteAngular, logAssemblies, linLog
@@ -492,10 +506,47 @@ end
 -- Diagnostics. With LINEARIZE_DEBUG on, nothing is converted -- every catch is just reported, so you
 -- can learn what a given game actually does to you (which properties, from which script) before
 -- trusting the transformer with it.
-function linLog(channel: string, detail: string)
-	if not LINEARIZE_DEBUG then
+-- Queue a line for output. Kept cheap: the caller is often inside a metamethod hook running on every
+-- property write in the game, so this must not print or touch the filesystem per event.
+local function logEmit(line: string)
+	local stamped = ("[%.2f] %s"):format(tick() % 100000, line)
+	print("[LinearMovement] " .. stamped)
+	if LOG_TO_FILE then
+		table.insert(logBuf, stamped)
+		if #logBuf > 400 then
+			table.remove(logBuf, 1) -- bound memory if flushing is unavailable
+		end
+	end
+end
+
+-- Batch the buffer to disk. Called on a timer and on teardown, never per event.
+local function flushLog()
+	if not LOG_TO_FILE or #logBuf == 0 or not appendfile then
 		return
 	end
+	local chunk = table.concat(logBuf, "\n") .. "\n"
+	table.clear(logBuf)
+	pcall(function()
+		appendfile(LOG_FILE, chunk)
+	end)
+end
+
+function linLog(channel: string, detail: string)
+	if not LINEARIZE_DEBUG and not LINEARIZE_AUDIT then
+		return
+	end
+	local now = tick()
+	local last = logLast[channel]
+	if last and now - last < LOG_THROTTLE then
+		-- same channel again too soon: count it instead of printing, so a script that writes every
+		-- frame shows up as a rate rather than thousands of identical lines
+		logSkipped[channel] = (logSkipped[channel] or 0) + 1
+		return
+	end
+	logLast[channel] = now
+	local repeats = logSkipped[channel]
+	logSkipped[channel] = 0
+	-- resolving the calling script is expensive, so it only happens on lines we actually keep
 	local src = "?"
 	if getcallingscript then
 		local ok, s = pcall(getcallingscript)
@@ -504,7 +555,8 @@ function linLog(channel: string, detail: string)
 			src = (ok2 and full) or tostring(s)
 		end
 	end
-	print(("[LinearMovement] %s | %s | src=%s"):format(channel, detail, src))
+	local suffix = (repeats and repeats > 0) and (" (+%d suppressed)"):format(repeats) or ""
+	logEmit(("%s | %s | src=%s%s"):format(channel, detail, src, suffix))
 end
 
 -- Answers the "how does this game ragdoll me?" question: if a knock splits the character into several
@@ -634,7 +686,7 @@ local function auditVelocity()
 		auditLastReport = now
 		local hum = humanoid
 		local driving = (linLV and linLV.Enabled) or (linYLV and linYLV.Enabled)
-		print(("[LinearMovement] AUDIT unexplained=%.1f actual=%.1f cmd=%.1f state=%s floor=%s moveDir=%.2f linearDriving=%s")
+		logEmit(("AUDIT unexplained=%.1f actual=%.1f cmd=%.1f state=%s floor=%s moveDir=%.2f linearDriving=%s")
 			:format(
 				unexplained,
 				Vector3.new(vel.X, 0, vel.Z).Magnitude,
@@ -750,6 +802,11 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	-- the linearizer runs on its own, independent of the speed booster below
 	updateLinearize()
 	auditVelocity()
+	-- batch the log to disk on a timer so a lost session still leaves the last seconds on record
+	if LOG_TO_FILE and tick() >= logNextFlush then
+		logNextFlush = tick() + LOG_FLUSH_EVERY
+		flushLog()
+	end
 
 	if hum.Health <= 0 or stateBlocksMovement() then
 		disableAll()
@@ -875,6 +932,8 @@ local function cleanup()
 	table.clear(connections)
 	stopStep()
 	stopLinearize()
+	logEmit("session end (cleanup)")
+	flushLog()
 	teardown()
 	_G.__LinearMovementCleanup = nil
 end
@@ -1019,6 +1078,29 @@ if (LINEARIZE_METHODS or LINEARIZE_DEBUG) and hookmetamethod and newcclosure and
 		end))
 	end)
 end
+
+-- Session marker: makes separate runs distinguishable in a log file that is appended to, and records
+-- which flags were actually active for that run so a log is interpretable later.
+if LINEARIZE_DEBUG or LINEARIZE_AUDIT then
+	logEmit(("=== session start | debug=%s audit=%s convert=%s rig=%s methods=%s movers=%s ragdoll=%s ===")
+		:format(
+			tostring(LINEARIZE_DEBUG), tostring(LINEARIZE_AUDIT), tostring(LINEARIZE_FOREIGN),
+			tostring(LINEARIZE_WHOLE_RIG), tostring(LINEARIZE_METHODS),
+			tostring(LINEARIZE_MOVERS), tostring(LINEARIZE_RAGDOLL)
+		))
+	if LOG_TO_FILE and not appendfile then
+		logEmit("WARNING: LOG_TO_FILE is on but this executor has no appendfile; log is print-only")
+	end
+	flushLog()
+end
+
+-- Losing the session stops the Heartbeat flush, so push whatever is buffered out on the way down.
+table.insert(connections, player.AncestryChanged:Connect(function()
+	if not player.Parent then
+		logEmit("session end (player removed)")
+		flushLog()
+	end
+end))
 
 if player.Character then
 	task.spawn(onCharacterAdded, player.Character)
