@@ -1,10 +1,14 @@
 --!nonstrict
 
--- LinearMovement: boosts your movement through a LinearVelocity constraint layered
--- ON TOP of normal humanoid movement. Native walking still handles animation, jumping,
--- slopes, stairs, rooting and the game's own WalkSpeed (e.g. carry slow-downs); the
--- constraint only kicks in when your effective speed is above the game's, and drives
--- the extra speed. When you are not boosting it does nothing, so movement stays vanilla.
+-- LinearMovement: moves you with a LinearVelocity constraint instead of raw velocity writes.
+-- Native humanoid movement still handles animation, jumping, rooting and the game's own
+-- WalkSpeed (e.g. carry slow-downs). Two modes:
+--   LINEAR_PRIMARY = false (default) -- booster. The constraint only engages when your effective
+--     speed is above the game's, and drives the extra speed. Otherwise movement is pure vanilla.
+--   LINEAR_PRIMARY = true            -- the constraint drives ALL walking, at whatever speed the
+--     game allows (with SPEED_MULT = 1 that is exactly the game's WalkSpeed).
+-- Primary mode changes the MECHANISM, not the speed. Moving faster than the game allows is what
+-- gets noticed, and that comes from SPEED_MULT / SPEED_FIXED -- not from which mode you pick.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -17,7 +21,13 @@ local player = Players.LocalPlayer
 local SPEED_MULT = 1        -- multiplier on the game's live WalkSpeed (default 1 = follow the game's speed exactly)
 local SPEED_FIXED = 0       -- 0 = not fixed; speed follows the game (WalkSpeed * SPEED_MULT). Set > 0 only to hard-lock a speed.
 
-local AIR_CONTROL = true    -- steer while airborne (only matters while boosting)
+-- LINEAR_PRIMARY: drive ALL walking through the constraint, not only the part above the game's speed.
+-- With SPEED_MULT = 1 this moves you at exactly the game's WalkSpeed -- same speed as vanilla, but the
+-- plane constraint is what moves you. Native movement still owns animation, jumping and rooting.
+-- NOTE: this changes the MECHANISM, not the speed. It is not by itself safer or less safe; going
+-- faster than the game allows is what gets noticed, and that is SPEED_MULT / SPEED_FIXED, not this.
+local LINEAR_PRIMARY = false
+local AIR_CONTROL = true    -- steer while airborne (only matters while the constraint is driving)
 -- CARRY_SAFE: whenever the game slows you below your normal speed -- carrying something, a debuff,
 -- any deliberate slow-down -- stand fully down. No boost, no linearizing, no constraints: pure
 -- vanilla movement. The game slowing you is the game telling you how fast you may go, and moving
@@ -855,10 +865,9 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 		flushLog()
 	end
 
-	if slowed then
-		-- Full standdown. The game slowing you is the game stating your speed limit; exceeding it
-		-- while carrying is exactly the mismatch a carry check is looking for. Hand everything back
-		-- to vanilla movement until the slow-down lifts.
+	if slowed and not LINEAR_PRIMARY then
+		-- Booster mode: there is nothing to do while slowed except get out of the way, since the only
+		-- thing the constraint would add is speed the game just took away.
 		linLog("carry", ("slowed: ws=%.1f base=%.1f -> standing down"):format(hum.WalkSpeed, baseWalkSpeed))
 		disableAll()
 		stopLinearize()
@@ -876,9 +885,17 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	local gameWS = hum.WalkSpeed
 	local rooted = gameWS <= 0.01
 	local effectiveSpeed = (SPEED_FIXED > 0) and SPEED_FIXED or (gameWS * SPEED_MULT)
+	-- While the game has you slowed, never exceed the speed it just handed you. In primary mode we
+	-- keep driving (the constraint stays the mover) but at exactly the game's speed, so the mechanism
+	-- is still linear and the speed is still whatever the game says it should be.
+	if slowed then
+		effectiveSpeed = gameWS
+	end
 	local boosting = (not rooted) and effectiveSpeed > gameWS + 0.1
+	-- primary mode drives every step; booster mode only drives the part above the game's speed
+	local driving = boosting or (LINEAR_PRIMARY and not rooted)
 
-	if not boosting then
+	if not driving then
 		-- vanilla native movement handles everything (speed, slopes, stairs, anim, rooting)
 		disableAll()
 		return
