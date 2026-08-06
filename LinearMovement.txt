@@ -99,11 +99,11 @@ local LINEARIZE_METHODS = true   -- catch :ApplyImpulse / :PivotTo / :MoveTo / :
 local LINEARIZE_MOVERS = true    -- catch foreign BodyVelocity/VectorForce/etc parented to your rig
 -- Diagnostics: log every caught channel WITHOUT converting anything, so you can see what a given
 -- game/script actually does to you (and how it ragdolls) before you turn conversion on.
-local LINEARIZE_DEBUG = false
+local LINEARIZE_DEBUG = true
 -- Leak detector: each frame, compare your ACTUAL velocity against what our constraints commanded and
 -- report any unexplained jump. This is how you find velocity arriving through a channel we cannot
 -- hook at all (the server, replication, or a script that hooked the metamethod above us).
-local LINEARIZE_AUDIT = false
+local LINEARIZE_AUDIT = true
 local AUDIT_TOLERANCE = 12       -- studs/s of unexplained change before it gets reported
 local AUDIT_COOLDOWN = 0.5       -- min seconds between reports, so the log stays readable
 -- Logging. The property hook runs on EVERY write in the game, so logging is throttled per channel --
@@ -112,7 +112,7 @@ local LOG_THROTTLE = 0.75        -- min seconds between log lines for the same c
 -- Persist the log to a file so it survives losing the session. Without this, anything logged in the
 -- last moments before a disconnect is gone with the output window, which is exactly the window you
 -- care about when something ends your session abruptly. Needs an executor with writefile/appendfile.
-local LOG_TO_FILE = false
+local LOG_TO_FILE = true
 local LOG_FILE = "LinearMovement_log.txt"
 local LOG_FLUSH_EVERY = 0.5      -- seconds between file writes (batched; never write per-event)
 
