@@ -18,8 +18,15 @@ local player = Players.LocalPlayer
 
 -- Speed: effective = SPEED_FIXED (if > 0) else the game's current WalkSpeed * SPEED_MULT.
 -- Multiply mode respects carry slow-downs / boosts and never fights the game's rooting.
-local SPEED_MULT = 1        -- multiplier on the game's live WalkSpeed (default 1 = follow the game's speed exactly)
-local SPEED_FIXED = 0       -- 0 = not fixed; speed follows the game (WalkSpeed * SPEED_MULT). Set > 0 only to hard-lock a speed.
+-- YOUR SPEED. These two are the only things that decide how fast you move.
+--   SPEED_FIXED > 0  -> hard-lock that exact speed. Overrides everything, including any speed
+--                       adopted from another script. This is the one to set if you want a number.
+--   SPEED_FIXED = 0  -> speed is SPEED_MULT x the live reference speed. The reference is normally
+--                       the game's WalkSpeed, or a speed adopted from another mover when one is
+--                       driving the pace -- either way SPEED_MULT still multiplies it.
+-- A carry slow-down clamps on top of both (CARRY_SAFE), and rooting is always respected.
+local SPEED_MULT = 1        -- 1 = exactly the reference speed; 2 = twice it; etc.
+local SPEED_FIXED = 0       -- 0 = use SPEED_MULT. Set > 0 to hard-lock an exact speed.
 
 -- LINEAR_PRIMARY: drive ALL walking through the constraint, not only the part above the game's speed.
 -- With SPEED_MULT = 1 this moves you at exactly the game's WalkSpeed -- same speed as vanilla, but the
@@ -1088,16 +1095,16 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	-- referenceSpeed sees through a foreign zeroing of WalkSpeed; genuine rooting still reads as 0
 	local gameWS = referenceSpeed()
 	local rooted = gameWS <= 0.01
-	-- Precedence: an explicit SPEED_FIXED wins; otherwise a freshly adopted foreign speed (so their
-	-- speed control still means something); otherwise the game's own speed times SPEED_MULT.
-	local effectiveSpeed
-	if SPEED_FIXED > 0 then
-		effectiveSpeed = SPEED_FIXED
-	elseif ADOPT_FOREIGN_SPEED and foreignSpeed > 0 and tick() < foreignSpeedUntil then
-		effectiveSpeed = foreignSpeed
-	else
-		effectiveSpeed = gameWS * SPEED_MULT
+	-- Your settings always apply. SPEED_FIXED hard-locks the speed and overrides everything else.
+	-- Otherwise SPEED_MULT multiplies whichever reference is live -- an adopted foreign speed if
+	-- another mover is currently driving the pace, else the game's own WalkSpeed. Earlier this used
+	-- adoption INSTEAD of SPEED_MULT, which silently made SPEED_MULT do nothing whenever another
+	-- script was writing.
+	local speedBase = gameWS
+	if ADOPT_FOREIGN_SPEED and foreignSpeed > 0 and tick() < foreignSpeedUntil then
+		speedBase = foreignSpeed
 	end
+	local effectiveSpeed = (SPEED_FIXED > 0) and SPEED_FIXED or (speedBase * SPEED_MULT)
 	-- While the game has you slowed, never exceed the speed it just handed you. In primary mode we
 	-- keep driving (the constraint stays the mover) but at exactly the game's speed, so the mechanism
 	-- is still linear and the speed is still whatever the game says it should be.
