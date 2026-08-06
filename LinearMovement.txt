@@ -115,6 +115,11 @@ local LOG_THROTTLE = 0.75        -- min seconds between log lines for the same c
 local LOG_TO_FILE = true
 local LOG_FILE = "LinearMovement_log.txt"
 local LOG_FLUSH_EVERY = 0.5      -- seconds between file writes (batched; never write per-event)
+-- On-screen log panel. Needed on mobile, where there is no F9 console and you cannot run anything
+-- after being kicked. On startup it also loads the PREVIOUS session's log off disk, so after a kick
+-- you just relaunch and read what happened -- no console, no file browsing.
+local LOG_ON_SCREEN = true
+local SCREEN_LINES = 60          -- lines kept in the on-screen buffer
 
 local humanoid: Humanoid? = nil
 local rootPart: BasePart? = nil
@@ -161,6 +166,9 @@ local logLast: { [string]: number } = {}
 local logSkipped: { [string]: number } = {}
 local logBuf: { string } = {}
 local logNextFlush = 0
+local screenLines: { string } = {}   -- ring buffer backing the on-screen panel
+local screenDirty = false
+local prevLogText = ""               -- the previous session's log, recovered from disk at startup
 
 -- forward declarations: these are defined further down but referenced from onCharacterAdded above them
 local noteIntent, noteAngular, logAssemblies, linLog
@@ -567,6 +575,13 @@ local function logEmit(line: string)
 		if #logBuf > 400 then
 			table.remove(logBuf, 1) -- bound memory if flushing is unavailable
 		end
+	end
+	if LOG_ON_SCREEN then
+		table.insert(screenLines, stamped)
+		while #screenLines > SCREEN_LINES do
+			table.remove(screenLines, 1)
+		end
+		screenDirty = true
 	end
 end
 
@@ -1194,6 +1209,175 @@ if (LINEARIZE_FOREIGN and LINEARIZE_METHODS or LINEARIZE_DEBUG)
 			end
 			return realNamecall(self, ...)
 		end))
+	end)
+end
+
+-- Recover the previous session's log BEFORE this run appends anything, then clear the file so the
+-- two never blur together. On mobile this is the whole point: get kicked, relaunch, read what
+-- happened -- without a console and without opening the file yourself.
+if (LOG_TO_FILE or LOG_ON_SCREEN) and isfile and readfile then
+	pcall(function()
+		if isfile(LOG_FILE) then
+			prevLogText = readfile(LOG_FILE) or ""
+			if writefile then
+				writefile(LOG_FILE, "")
+			end
+		end
+	end)
+end
+
+-- On-screen log panel: a console substitute for platforms that have no console.
+if LOG_ON_SCREEN and (LINEARIZE_DEBUG or LINEARIZE_AUDIT) then
+	pcall(function()
+		local gui = Instance.new("ScreenGui")
+		gui.Name = "LinearLog"
+		gui.ResetOnSpawn = false
+		gui.IgnoreGuiInset = true
+		gui.DisplayOrder = 9999
+		gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+		local parented = false
+		if gethui then
+			local okH, h = pcall(gethui)
+			if okH and h then
+				gui.Parent = h
+				parented = true
+			end
+		end
+		if not parented then
+			gui.Parent = player:WaitForChild("PlayerGui")
+		end
+
+		local panel = Instance.new("Frame")
+		panel.Size = UDim2.fromScale(0.94, 0.42)
+		panel.Position = UDim2.fromScale(0.03, 0.07)
+		panel.BackgroundColor3 = Color3.fromRGB(12, 12, 16)
+		panel.BackgroundTransparency = 0.12
+		panel.BorderSizePixel = 0
+		panel.Visible = false
+		panel.Parent = gui
+		Instance.new("UICorner").Parent = panel
+
+		-- Buttons are sized for touch: small targets are unusable on a phone.
+		local function mkButton(text, xScale, wScale, color)
+			local b = Instance.new("TextButton")
+			b.Size = UDim2.new(wScale, -4, 0, 34)
+			b.Position = UDim2.new(xScale, 2, 0, 4)
+			b.BackgroundColor3 = color
+			b.BorderSizePixel = 0
+			b.Text = text
+			b.TextColor3 = Color3.fromRGB(235, 235, 240)
+			b.Font = Enum.Font.GothamBold
+			b.TextSize = 13
+			b.Parent = panel
+			Instance.new("UICorner").Parent = b
+			return b
+		end
+
+		local liveBtn = mkButton("LIVE", 0.00, 0.25, Color3.fromRGB(38, 82, 58))
+		local prevBtn = mkButton("PREVIOUS", 0.25, 0.32, Color3.fromRGB(40, 44, 62))
+		local copyBtn = mkButton("COPY", 0.57, 0.22, Color3.fromRGB(40, 44, 62))
+		local closeBtn = mkButton("CLOSE", 0.79, 0.21, Color3.fromRGB(78, 38, 42))
+
+		local scroll = Instance.new("ScrollingFrame")
+		scroll.Size = UDim2.new(1, -8, 1, -46)
+		scroll.Position = UDim2.new(0, 4, 0, 42)
+		scroll.BackgroundTransparency = 1
+		scroll.BorderSizePixel = 0
+		scroll.ScrollBarThickness = 6
+		scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		scroll.CanvasSize = UDim2.new()
+		scroll.Parent = panel
+
+		local text = Instance.new("TextLabel")
+		text.Size = UDim2.new(1, 0, 0, 0)
+		text.AutomaticSize = Enum.AutomaticSize.Y
+		text.BackgroundTransparency = 1
+		text.Font = Enum.Font.Code
+		text.TextSize = 11
+		text.TextColor3 = Color3.fromRGB(215, 225, 215)
+		text.TextXAlignment = Enum.TextXAlignment.Left
+		text.TextYAlignment = Enum.TextYAlignment.Top
+		text.TextWrapped = true
+		text.Text = ""
+		text.Parent = scroll
+
+		-- The toggle stays out of the way and out of the thumb zone used for movement.
+		local toggle = Instance.new("TextButton")
+		toggle.Size = UDim2.new(0, 54, 0, 40)
+		toggle.Position = UDim2.fromScale(0.90, 0.008)
+		toggle.BackgroundColor3 = Color3.fromRGB(28, 30, 40)
+		toggle.BackgroundTransparency = 0.25
+		toggle.BorderSizePixel = 0
+		toggle.Text = "LOG"
+		toggle.TextColor3 = Color3.fromRGB(150, 230, 170)
+		toggle.Font = Enum.Font.GothamBold
+		toggle.TextSize = 12
+		toggle.Parent = gui
+		Instance.new("UICorner").Parent = toggle
+
+		local showingPrev = false
+		local function render()
+			if showingPrev then
+				text.Text = (#prevLogText > 0) and prevLogText
+					or "No previous session log found.\n\nGet kicked, then run the script again -- the log from the run before will appear here."
+			else
+				text.Text = (#screenLines > 0) and table.concat(screenLines, "\n") or "waiting for events..."
+			end
+		end
+
+		liveBtn.MouseButton1Click:Connect(function()
+			showingPrev = false
+			liveBtn.BackgroundColor3 = Color3.fromRGB(38, 82, 58)
+			prevBtn.BackgroundColor3 = Color3.fromRGB(40, 44, 62)
+			render()
+		end)
+		prevBtn.MouseButton1Click:Connect(function()
+			showingPrev = true
+			prevBtn.BackgroundColor3 = Color3.fromRGB(38, 82, 58)
+			liveBtn.BackgroundColor3 = Color3.fromRGB(40, 44, 62)
+			render()
+		end)
+		copyBtn.MouseButton1Click:Connect(function()
+			if setclipboard then
+				pcall(setclipboard, text.Text)
+				copyBtn.Text = "COPIED"
+				task.delay(1.2, function() copyBtn.Text = "COPY" end)
+			else
+				copyBtn.Text = "N/A"
+				task.delay(1.2, function() copyBtn.Text = "COPY" end)
+			end
+		end)
+		closeBtn.MouseButton1Click:Connect(function()
+			panel.Visible = false
+		end)
+		toggle.MouseButton1Click:Connect(function()
+			panel.Visible = not panel.Visible
+			if panel.Visible then
+				render()
+			end
+		end)
+
+		-- Refresh on a slow timer, and only while visible: redrawing per event would cost more than
+		-- the logging it is reporting on.
+		task.spawn(function()
+			while alive do
+				task.wait(0.25)
+				if panel.Visible and not showingPrev and screenDirty then
+					screenDirty = false
+					render()
+					scroll.CanvasPosition = Vector2.new(0, math.max(0, scroll.AbsoluteCanvasSize.Y))
+				end
+			end
+		end)
+
+		-- If a previous log exists, open straight to it: after a kick that is what you came to read.
+		if #prevLogText > 0 then
+			showingPrev = true
+			prevBtn.BackgroundColor3 = Color3.fromRGB(38, 82, 58)
+			liveBtn.BackgroundColor3 = Color3.fromRGB(40, 44, 62)
+			panel.Visible = true
+			render()
+		end
 	end)
 end
 
