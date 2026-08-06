@@ -179,10 +179,31 @@ local rootPart: BasePart? = nil
 local attachment: Attachment? = nil
 local moveLV: LinearVelocity? = nil
 local stepLV: LinearVelocity? = nil
-local linLV: LinearVelocity? = nil     -- horizontal (XZ plane) reproduction
-local linYLV: LinearVelocity? = nil    -- vertical (Y line), only when an intent is truly vertical
 local linAV: AngularVelocity? = nil    -- spin/tumble reproduction
-local jumpLV: LinearVelocity? = nil    -- linear jump drive (Y line)
+
+-- ARBITER. Exactly one source may drive each axis per frame; the highest priority wins. This is the
+-- structural fix for every fling we hit: two constraints pulling one axis in different directions
+-- cannot be resolved by the physics solver, so the conflict has to be settled before it gets there.
+local PRIO_KNOCK = 100    -- an external knock playing out
+local PRIO_GLIDE = 80     -- a caught teleport being glided
+local PRIO_JUMP = 70      -- jump drive
+local PRIO_STEP = 60      -- step assist (climbing a ledge)
+local PRIO_WALK = 55      -- our own walking
+local PRIO_FOREIGN = 50   -- reproduced foreign motion
+local PRIO_SLOPE = 30     -- slope glue
+local reqXZ: { vx: number, vz: number, prio: number, src: string }? = nil
+local reqY: { vy: number, prio: number, src: string }? = nil
+
+local function requestXZ(prio: number, vx: number, vz: number, src: string)
+	if not reqXZ or prio > reqXZ.prio then
+		reqXZ = { vx = vx, vz = vz, prio = prio, src = src }
+	end
+end
+local function requestY(prio: number, vy: number, src: string)
+	if not reqY or prio > reqY.prio then
+		reqY = { vy = vy, prio = prio, src = src }
+	end
+end
 local rayParams: RaycastParams? = nil
 
 local footOffset = 3
@@ -201,7 +222,6 @@ local lastRealWS = 0        -- last non-zero WalkSpeed we observed, kept across 
 local foreignRootActive = false -- a foreign script has WalkSpeed pinned at 0 to monopolise movement
 local foreignSpeed = 0      -- speed read out of another mover's walk writes
 local foreignSpeedUntil = 0 -- when that adopted speed goes stale
-local glideActive = false   -- a caught teleport is being glided; it owns movement while it runs
 local speedLimit = 0        -- your configured speed this frame, used to cap reproduced motion
 local jumpDriveUntil = 0    -- how long the linear jump keeps driving upward
 -- transformer state: the latest caught foreign motion, normalized into one intent record
@@ -243,10 +263,7 @@ local alive = true
 local function teardown()
 	if moveLV then moveLV:Destroy() moveLV = nil end
 	if stepLV then stepLV:Destroy() stepLV = nil end
-	if linLV then linLV:Destroy() linLV = nil end
-	if linYLV then linYLV:Destroy() linYLV = nil end
 	if linAV then linAV:Destroy() linAV = nil end
-	if jumpLV then jumpLV:Destroy() jumpLV = nil end
 	if attachment then attachment:Destroy() attachment = nil end
 end
 
@@ -298,32 +315,6 @@ local function build()
 	step.Enabled = false
 	step.Parent = rootPart
 
-	-- Linearizer, split by axis so gravity survives: horizontal goes through a Plane (XZ) constraint
-	-- and vertical through a separate Line (Y) constraint that only switches on for genuinely
-	-- vertical intents. A single Vector-mode constraint would drive all three axes and make you float.
-	local lin = Instance.new("LinearVelocity")
-	lin.Name = "LinearForce"
-	lin.Attachment0 = att
-	lin.RelativeTo = Enum.ActuatorRelativeTo.World
-	lin.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
-	lin.PrimaryTangentAxis = Vector3.new(1, 0, 0)
-	lin.SecondaryTangentAxis = Vector3.new(0, 0, 1)
-	lin.MaxForce = LINEARIZE_FORCE
-	lin.PlaneVelocity = Vector2.zero
-	lin.Enabled = false
-	lin.Parent = rootPart
-
-	local linY = Instance.new("LinearVelocity")
-	linY.Name = "LinearForceY"
-	linY.Attachment0 = att
-	linY.RelativeTo = Enum.ActuatorRelativeTo.World
-	linY.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
-	linY.LineDirection = Vector3.new(0, 1, 0)
-	linY.MaxForce = LINEARIZE_FORCE
-	linY.LineVelocity = 0
-	linY.Enabled = false
-	linY.Parent = rootPart
-
 	-- ragdolls tumble; without this a knock travels linearly but never rotates, which looks wrong
 	local spin = Instance.new("AngularVelocity")
 	spin.Name = "LinearSpin"
@@ -334,25 +325,15 @@ local function build()
 	spin.Enabled = false
 	spin.Parent = rootPart
 
-	-- separate from stepLV so a jump never fights step-assist or slope-glue for the Y axis
-	local jump = Instance.new("LinearVelocity")
-	jump.Name = "LinearJump"
-	jump.Attachment0 = att
-	jump.RelativeTo = Enum.ActuatorRelativeTo.World
-	jump.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
-	jump.LineDirection = Vector3.new(0, 1, 0)
-	jump.MaxForce = LINEARIZE_FORCE
-	jump.LineVelocity = 0
-	jump.Enabled = false
-	jump.Parent = rootPart
-
+	-- Deliberately only TWO velocity constraints: one owning the horizontal plane, one owning the
+	-- vertical line. Every feature (walking, jumping, steps, slopes, glides, reproduced foreign
+	-- motion) competes through the arbiter below and the winner drives these. Giving features their
+	-- own constraints is what produced the flings -- two constraints pulling the same axis different
+	-- ways is unresolvable at the physics layer, so it must be resolved before it gets there.
 	attachment = att
 	moveLV = move
 	stepLV = step
-	linLV = lin
-	linYLV = linY
 	linAV = spin
-	jumpLV = jump
 end
 
 local function computeFootOffset(char: Model, hum: Humanoid, hrp: BasePart): number
@@ -682,12 +663,10 @@ local function suppressForeign()
 	end
 end
 
+-- Clears the step STATE only. The Y constraint is commit()'s to write; a step ending does not mean
+-- the axis should go silent, since a slope or a glide may still want it this frame.
 local function stopStep()
 	stepping = false
-	if stepLV and stepLV.Parent then
-		stepLV.Enabled = false
-		stepLV.LineVelocity = 0
-	end
 end
 
 -- Diagnostics. With LINEARIZE_DEBUG on, nothing is converted -- every catch is just reported, so you
@@ -779,7 +758,6 @@ function logAssemblies(tag: string)
 end
 
 local function stopLinearize()
-	glideActive = false
 	linKind = nil
 	linPosTarget = nil
 	linNoY = false
@@ -787,14 +765,6 @@ local function stopLinearize()
 	linVec = Vector3.zero
 	linAngVec = Vector3.zero
 	linAngUntil = 0
-	if linLV and linLV.Parent then
-		linLV.Enabled = false
-		linLV.PlaneVelocity = Vector2.zero
-	end
-	if linYLV and linYLV.Parent then
-		linYLV.Enabled = false
-		linYLV.LineVelocity = 0
-	end
 	if linAV and linAV.Parent then
 		linAV.Enabled = false
 		linAV.AngularVelocity = Vector3.zero
@@ -833,17 +803,13 @@ function noteAngular(vec: Vector3)
 	linAngUntil = tick() + LINEARIZE_TTL
 end
 
--- Drive the constraints from the current intent. Horizontal always goes through the plane
--- constraint; the Y constraint only engages when the intent is genuinely vertical (or when
--- LINEARIZE_GRAVITY is off), so you keep falling normally instead of hanging in the air.
+-- Turn the current intent into axis REQUESTS rather than driving constraints directly. Whether a
+-- request actually wins is the arbiter's call, so a feature can never quietly fight another one.
 local function applyLinear(vec: Vector3)
-	local lin, linY = linLV, linYLV
-	-- Clamp horizontal speed to what the game currently permits. Vertical is left alone: jumps and
-	-- falls are not walking, and WalkSpeed says nothing about them.
+	-- Clamp horizontal speed to YOUR configured speed, not the game's raw WalkSpeed -- using
+	-- WalkSpeed here meant any path that reproduces motion ignored your setting entirely.
 	if LINEARIZE_CLAMP then
 		local hum = humanoid
-		-- YOUR speed is the ceiling, not the game's raw WalkSpeed. Using WalkSpeed here meant any
-		-- path that reproduces motion (rather than replacing it) ignored your setting entirely.
 		local limit = (speedLimit > 0) and speedLimit or (hum and hum.WalkSpeed or nil)
 		if limit then
 			local hx, hz = vec.X, vec.Z
@@ -856,29 +822,13 @@ local function applyLinear(vec: Vector3)
 			end
 		end
 	end
-	if lin and lin.Parent then
-		if linNoXZ then
-			-- our own movement owns the horizontal axis; a second plane constraint driving it would
-			-- fight the first and fling the character
-			lin.Enabled = false
-			lin.PlaneVelocity = Vector2.zero
-		else
-			lin.PlaneVelocity = Vector2.new(vec.X, vec.Z)
-			lin.Enabled = true
-		end
+	if not linNoXZ then
+		requestXZ(PRIO_FOREIGN, vec.X, vec.Z, "foreign")
 	end
-	if linY and linY.Parent then
-		if linNoY then
-			-- the source explicitly preserved Y; hands off the vertical axis
-			linY.Enabled = false
-			linY.LineVelocity = 0
-		elseif not LINEARIZE_GRAVITY or math.abs(vec.Y) > 0.5 then
-			linY.LineVelocity = vec.Y
-			linY.Enabled = true
-		else
-			linY.Enabled = false
-			linY.LineVelocity = 0
-		end
+	-- Vertical only when the intent is genuinely vertical; the preserve-Y idiom and the
+	-- gravity preference both mean "hands off Y", so we simply do not request it.
+	if not linNoY and (not LINEARIZE_GRAVITY or math.abs(vec.Y) > 0.5) then
+		requestY(PRIO_FOREIGN, vec.Y, "foreign")
 	end
 end
 
@@ -899,14 +849,8 @@ local function auditVelocity()
 	if moveLV and moveLV.Parent and moveLV.Enabled then
 		cx, cz = moveLV.PlaneVelocity.X, moveLV.PlaneVelocity.Y
 	end
-	if linLV and linLV.Parent and linLV.Enabled then
-		cx, cz = linLV.PlaneVelocity.X, linLV.PlaneVelocity.Y
-	end
 	if stepLV and stepLV.Parent and stepLV.Enabled then
 		cy = stepLV.LineVelocity
-	end
-	if linYLV and linYLV.Parent and linYLV.Enabled then
-		cy = linYLV.LineVelocity
 	end
 	local cmd = Vector3.new(cx, cy, cz)
 
@@ -916,21 +860,24 @@ local function auditVelocity()
 	if unexplained > AUDIT_TOLERANCE and now - auditLastReport > AUDIT_COOLDOWN then
 		auditLastReport = now
 		local hum = humanoid
-		local driving = (linLV and linLV.Enabled) or (linYLV and linYLV.Enabled)
 		-- ws/rooted are here because a zeroed WalkSpeed is the single most common reason the
 		-- constraint reports cmd=0: rooting is respected, so WalkSpeed 0 means we must not move you.
+		-- ownXZ/ownY name which feature won each axis, which is the fastest way to see a feature
+		-- being outranked when something feels stuck.
 		local ws = hum and hum.WalkSpeed or -1
-		logEmit(("AUDIT unexplained=%.1f actual=%.1f cmd=%.1f ws=%.1f rooted=%s state=%s floor=%s moveDir=%.2f linearDriving=%s")
+		logEmit(("AUDIT unexplained=%.1f actual=%.1f cmd=%.1f ws=%.1f limit=%.1f rooted=%s state=%s floor=%s moveDir=%.2f ownXZ=%s ownY=%s")
 			:format(
 				unexplained,
 				Vector3.new(vel.X, 0, vel.Z).Magnitude,
 				Vector3.new(cmd.X, 0, cmd.Z).Magnitude,
 				ws,
+				speedLimit,
 				tostring(ws <= 0.01),
 				hum and tostring(hum:GetState()) or "?",
 				hum and tostring(hum.FloorMaterial) or "?",
 				hum and hum.MoveDirection.Magnitude or 0,
-				tostring(driving and true or false)
+				reqXZ and reqXZ.src or "none",
+				reqY and reqY.src or "none"
 			))
 	end
 	auditLastVel = vel
@@ -942,7 +889,7 @@ end
 local function updateLinearize()
 	local hrp = rootPart
 	local hum = humanoid
-	if not LINEARIZE_FOREIGN or LINEARIZE_DEBUG or not linLV or not linLV.Parent or not hrp then
+	if not LINEARIZE_FOREIGN or LINEARIZE_DEBUG or not hrp then
 		stopLinearize()
 		return
 	end
@@ -963,7 +910,6 @@ local function updateLinearize()
 		end
 	end
 
-	glideActive = false -- re-established below only while a glide is actually running
 	if linPosTarget then
 		local delta = linPosTarget - hrp.Position
 		if delta.Magnitude <= LINEARIZE_REACH then
@@ -971,29 +917,25 @@ local function updateLinearize()
 		else
 			-- speed scales with distance and eases as you arrive, capped at LINEARIZE_SPEED
 			local v = delta.Unit * math.min(delta.Magnitude * 8, LINEARIZE_SPEED)
-			-- Steering: while you are actively giving movement input, hand the HORIZONTAL axis back
-			-- to the walk constraint and let the glide drive only Y. The two never touch the same
-			-- axis, so there is no fight -- you just keep control of where you go on the way down.
-			-- With no input the glide owns both axes, so a sideways teleport still arrives.
-			local hum = humanoid
+			-- Abandon a downward glide the moment you are standing on something. Continuing to drive
+			-- down into a floor piles force into the contact until it resolves and launches you --
+			-- the same failure as pushing into a wall, which is why touching the floor mid-teleport
+			-- flung you. The target is unreachable anyway once the ground is in the way.
+			local grounded = hum and hum.FloorMaterial ~= Enum.Material.Air
+			if grounded and delta.Y < 0 then
+				linLog("glide", "abandoned: landed while gliding down")
+				stopLinearize()
+				return
+			end
+			-- Steering: while you are giving movement input, do not request the horizontal axis --
+			-- walking outranks the glide there, so you keep control on the way down. With no input
+			-- the glide requests both and a sideways teleport still arrives.
 			local steering = GLIDE_STEER and hum and hum.MoveDirection.Magnitude > 0.01
-			if linLV and linLV.Parent then
-				if steering then
-					linLV.Enabled = false
-					linLV.PlaneVelocity = Vector2.zero
-				else
-					linLV.PlaneVelocity = Vector2.new(v.X, v.Z)
-					linLV.Enabled = true
-				end
+			if not steering then
+				requestXZ(PRIO_GLIDE, v.X, v.Z, "glide")
 			end
-			-- a teleport IS a vertical command, so drive Y regardless of the gravity preference
-			if linYLV and linYLV.Parent then
-				linYLV.LineVelocity = v.Y
-				linYLV.Enabled = true
-			end
-			-- only claim ownership of movement when we are actually driving the horizontal plane;
-			-- claiming it while steering would disable the very walk constraint doing the steering
-			glideActive = not steering
+			-- a teleport IS a vertical command, so it requests Y regardless of the gravity preference
+			requestY(PRIO_GLIDE, v.Y, "glide")
 		end
 		return
 	end
@@ -1021,11 +963,9 @@ local function updateLinearize()
 	end
 end
 
+-- Stand down. Note it does NOT touch the constraints: commit() owns those, and clearing them here
+-- would race with a request another feature legitimately made this frame.
 local function disableAll()
-	if moveLV and moveLV.Parent then
-		moveLV.Enabled = false
-		moveLV.PlaneVelocity = Vector2.zero
-	end
 	-- Park the ramp at your real speed so that when the constraint takes over it starts from what
 	-- you are actually doing, instead of stepping from a stale value.
 	local hrp = rootPart
@@ -1050,21 +990,30 @@ table.insert(connections, UserInputService.JumpRequest:Connect(function()
 	end
 end))
 
--- Drive the jump on its own constraint. Separate from the movement Heartbeat so it still fires while
--- the character is in states the movement path bails out of (mid-air, for repeat jumps).
-table.insert(connections, RunService.Heartbeat:Connect(function()
-	local jump = jumpLV
-	if not jump or not jump.Parent then
-		return
+-- Commit the arbitration: exactly one winner drives the plane, one drives the line, everything else
+-- is off. This is the ONLY place either constraint is written, which is what makes an axis conflict
+-- structurally impossible rather than something to be patched per feature.
+local function commit()
+	local move, step = moveLV, stepLV
+	if move and move.Parent then
+		if reqXZ then
+			move.PlaneVelocity = Vector2.new(reqXZ.vx, reqXZ.vz)
+			move.Enabled = true
+		else
+			move.PlaneVelocity = Vector2.zero
+			move.Enabled = false
+		end
 	end
-	if LINEAR_JUMP and tick() < jumpDriveUntil then
-		jump.LineVelocity = JUMP_VELOCITY
-		jump.Enabled = true
-	elseif jump.Enabled then
-		jump.Enabled = false
-		jump.LineVelocity = 0
+	if step and step.Parent then
+		if reqY then
+			step.LineVelocity = reqY.vy
+			step.Enabled = true
+		else
+			step.LineVelocity = 0
+			step.Enabled = false
+		end
 	end
-end))
+end
 
 table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	local move = moveLV
@@ -1073,6 +1022,8 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	if not move or not move.Parent or not hum or not hrp then
 		return
 	end
+	-- fresh slate each frame; every feature must re-earn its axis
+	reqXZ, reqY = nil, nil
 
 	if SUPPRESS_OTHER then
 		suppressForeign()
@@ -1100,6 +1051,25 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	end
 	local slowed = CARRY_SAFE and baseWalkSpeed > 0 and wsNow < baseWalkSpeed - CARRY_SLOW_MARGIN
 
+	-- SPEED IS RESOLVED FIRST, before anything reads speedLimit. It used to be computed after
+	-- updateLinearize, so reproduced motion was clamped using the previous frame's limit -- or the
+	-- raw WalkSpeed on any frame that returned early, which is how the bat aimbot ended up pinned.
+	-- referenceSpeed sees through a foreign zeroing of WalkSpeed; genuine rooting still reads as 0.
+	local gameWS = referenceSpeed()
+	local rooted = gameWS <= 0.01
+	-- Your settings always apply. SPEED_FIXED hard-locks the speed and overrides everything else.
+	-- Otherwise SPEED_MULT multiplies whichever reference is live -- an adopted foreign speed if
+	-- another mover is currently setting the pace, else the game's own WalkSpeed.
+	local speedBase = gameWS
+	if ADOPT_FOREIGN_SPEED and foreignSpeed > 0 and tick() < foreignSpeedUntil then
+		speedBase = foreignSpeed
+	end
+	local effectiveSpeed = (SPEED_FIXED > 0) and SPEED_FIXED or (speedBase * SPEED_MULT)
+	if slowed and CARRY_SAFE then
+		effectiveSpeed = math.min(effectiveSpeed, gameWS)
+	end
+	speedLimit = effectiveSpeed
+
 	-- Diagnostics run before any standdown, so a carry window is still observable -- that window is
 	-- usually the one worth reading.
 	auditVelocity()
@@ -1114,45 +1084,33 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 		linLog("carry", ("slowed: ws=%.1f base=%.1f -> standing down"):format(hum.WalkSpeed, baseWalkSpeed))
 		disableAll()
 		stopLinearize()
+		commit()
 		return
 	end
 
-	-- the linearizer runs on its own, independent of the speed booster below
+	-- gather reproduced foreign motion (knock / glide / caught intents) as axis requests
 	updateLinearize()
 
 	if hum.Health <= 0 or stateBlocksMovement() then
 		disableAll()
+		commit()
 		return
 	end
 
-	-- referenceSpeed sees through a foreign zeroing of WalkSpeed; genuine rooting still reads as 0
-	local gameWS = referenceSpeed()
-	local rooted = gameWS <= 0.01
-	-- Your settings always apply. SPEED_FIXED hard-locks the speed and overrides everything else.
-	-- Otherwise SPEED_MULT multiplies whichever reference is live -- an adopted foreign speed if
-	-- another mover is currently driving the pace, else the game's own WalkSpeed. Earlier this used
-	-- adoption INSTEAD of SPEED_MULT, which silently made SPEED_MULT do nothing whenever another
-	-- script was writing.
-	local speedBase = gameWS
-	if ADOPT_FOREIGN_SPEED and foreignSpeed > 0 and tick() < foreignSpeedUntil then
-		speedBase = foreignSpeed
+	-- A jump is a Y request like any other, arbitrated rather than driven on its own constraint.
+	if LINEAR_JUMP and tick() < jumpDriveUntil then
+		requestY(PRIO_JUMP, JUMP_VELOCITY, "jump")
 	end
-	local effectiveSpeed = (SPEED_FIXED > 0) and SPEED_FIXED or (speedBase * SPEED_MULT)
-	-- publish it so reproduced motion is capped at your speed too, not the game's raw WalkSpeed
-	speedLimit = effectiveSpeed
-	-- While the game has you slowed, never exceed the speed it just handed you. In primary mode we
-	-- keep driving (the constraint stays the mover) but at exactly the game's speed, so the mechanism
-	-- is still linear and the speed is still whatever the game says it should be.
-	if slowed then
-		effectiveSpeed = gameWS
-	end
+
 	local boosting = (not rooted) and effectiveSpeed > gameWS + 0.1
 	-- primary mode drives every step; booster mode only drives the part above the game's speed
 	local driving = boosting or (LINEAR_PRIMARY and not rooted)
 
 	if not driving then
-		-- vanilla native movement handles everything (speed, slopes, stairs, anim, rooting)
+		-- vanilla native movement handles everything (speed, slopes, stairs, anim, rooting);
+		-- anything already requested (a knock, a glide) still commits below
 		disableAll()
+		commit()
 		return
 	end
 
@@ -1174,24 +1132,22 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 		local nowFy = feetY()
 		if nowFy == nil or nowFy >= stepTargetY - 0.1 or now > stepDeadline then
 			stopStep()
-		elseif stepLV and stepLV.Parent then
-			stepLV.LineVelocity = math.clamp((stepTargetY - nowFy) * 20, 4, liftCap)
-			stepLV.Enabled = true
+		else
+			requestY(PRIO_STEP, math.clamp((stepTargetY - nowFy) * 20, 4, liftCap), "step")
 		end
 	elseif grounded then
 		local handled = false
 		if STEP_ASSIST and floorTopY and fy then
 			local topY = detectStep(flat, floorTopY, STEP_PROBE + effectiveSpeed * 0.04)
-			if topY and (topY - fy) > 0.25 and stepLV and stepLV.Parent then
+			if topY and (topY - fy) > 0.25 then
 				stepping = true
 				stepTargetY = topY
 				stepDeadline = now + 0.6
-				stepLV.LineVelocity = math.clamp((topY - fy) * 20, 4, liftCap)
-				stepLV.Enabled = true
+				requestY(PRIO_STEP, math.clamp((topY - fy) * 20, 4, liftCap), "step")
 				handled = true
 			end
 		end
-		if not handled and stepLV and stepLV.Parent then
+		if not handled then
 			if SLOPE_GLUE and floorNormal and floorNormal.Y > 0.1 and floorNormal.Y < 0.999 then
 				-- hug the slope: drive Y so velocity stays tangent to the surface (up or down)
 				local vhx = dir.X * effectiveSpeed
@@ -1199,14 +1155,12 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 				local vy = -(vhx * floorNormal.X + vhz * floorNormal.Z) / floorNormal.Y
 				local cap = effectiveSpeed * 3.5 + 5
 				vy = math.clamp(vy, -cap, cap)
-				stepLV.LineVelocity = vy
-				stepLV.Enabled = true
+				requestY(PRIO_SLOPE, vy, "slope")
 				lastGlueTime = now
 				lastGlueVy = vy
 			elseif lastGlueVy > 0 and now - lastGlueTime < 0.2 then
 				-- just crested from an upslope onto flat: bleed the residual upward velocity so you don't launch
-				stepLV.LineVelocity = 0
-				stepLV.Enabled = true
+				requestY(PRIO_SLOPE, 0, "slope-crest")
 			else
 				stopStep()
 			end
@@ -1254,22 +1208,17 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 		drivenSpeed += gap * math.min(1, dt / math.max(SPEED_SMOOTH, 1e-3))
 	end
 
-	if glideActive then
-		-- a caught teleport is being glided and owns the plane; two constraints driving it toward
-		-- different targets is what flings you
-		move.Enabled = false
-		move.PlaneVelocity = Vector2.zero
-	elseif now < knockUntil then
-		move.Enabled = false
-		move.PlaneVelocity = Vector2.zero
+	if now < knockUntil then
+		-- something is shoving us harder than we asked for; let it play out at top priority rather
+		-- than wrestling it
+		requestXZ(PRIO_KNOCK, av.X, av.Z, "knock")
 	elseif moving and (grounded or AIR_CONTROL or stepping) then
-		move.PlaneVelocity = Vector2.new(dir.X * drivenSpeed + baseVX, dir.Z * drivenSpeed + baseVZ)
-		move.Enabled = true
-	else
-		-- idle (or airborne with no air control): let native movement hold/carry you
-		move.Enabled = false
-		move.PlaneVelocity = Vector2.zero
+		requestXZ(PRIO_WALK, dir.X * drivenSpeed + baseVX, dir.Z * drivenSpeed + baseVZ, "walk")
 	end
+	-- idle (or airborne with no air control) simply makes no request, so native movement holds you
+
+	-- one winner per axis, written in exactly one place
+	commit()
 end))
 
 local function cleanup()
