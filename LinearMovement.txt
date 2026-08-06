@@ -1522,10 +1522,11 @@ if LOG_ON_SCREEN and (LINEARIZE_DEBUG or LINEARIZE_AUDIT) then
 			return b
 		end
 
-		local liveBtn = mkButton("LIVE", 0.00, 0.25, Color3.fromRGB(38, 82, 58))
-		local prevBtn = mkButton("PREVIOUS", 0.25, 0.32, Color3.fromRGB(40, 44, 62))
-		local copyBtn = mkButton("COPY", 0.57, 0.22, Color3.fromRGB(40, 44, 62))
-		local closeBtn = mkButton("CLOSE", 0.79, 0.21, Color3.fromRGB(78, 38, 42))
+		local liveBtn = mkButton("LIVE", 0.00, 0.20, Color3.fromRGB(38, 82, 58))
+		local prevBtn = mkButton("PREV", 0.20, 0.20, Color3.fromRGB(40, 44, 62))
+		local setBtn = mkButton("TUNE", 0.40, 0.21, Color3.fromRGB(40, 44, 62))
+		local copyBtn = mkButton("COPY", 0.61, 0.20, Color3.fromRGB(40, 44, 62))
+		local closeBtn = mkButton("X", 0.81, 0.19, Color3.fromRGB(78, 38, 42))
 
 		local scroll = Instance.new("ScrollingFrame")
 		scroll.Size = UDim2.new(1, -8, 1, -46)
@@ -1564,28 +1565,138 @@ if LOG_ON_SCREEN and (LINEARIZE_DEBUG or LINEARIZE_AUDIT) then
 		toggle.Parent = gui
 		Instance.new("UICorner").Parent = toggle
 
-		local showingPrev = false
-		local function render()
-			if showingPrev then
-				text.Text = (#prevLogText > 0) and prevLogText
-					or "No previous session log found.\n\nGet kicked, then run the script again -- the log from the run before will appear here."
+		-- TUNE: live controls for the settings that are read every frame, so an experiment is a tap
+		-- rather than an edit-and-repaste. Only per-frame settings appear here -- anything consulted
+		-- once at startup (which hooks to install) cannot meaningfully change mid-session.
+		local tune = Instance.new("ScrollingFrame")
+		tune.Size = UDim2.new(1, -8, 1, -46)
+		tune.Position = UDim2.new(0, 4, 0, 42)
+		tune.BackgroundTransparency = 1
+		tune.BorderSizePixel = 0
+		tune.ScrollBarThickness = 6
+		tune.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		tune.CanvasSize = UDim2.new()
+		tune.Visible = false
+		tune.Parent = panel
+		local layout = Instance.new("UIListLayout")
+		layout.Padding = UDim.new(0, 4)
+		layout.Parent = tune
+
+		-- Each entry reads and writes the real config upvalue, so a tap changes actual behaviour.
+		local switches = {
+			{ "PRIMARY", function() return LINEAR_PRIMARY end, function(v) LINEAR_PRIMARY = v end },
+			{ "TAKEOVER", function() return LINEAR_TAKEOVER end, function(v) LINEAR_TAKEOVER = v end },
+			{ "CONVERT FOREIGN", function() return LINEARIZE_FOREIGN end, function(v) LINEARIZE_FOREIGN = v end },
+			{ "ADOPT SPEED", function() return ADOPT_FOREIGN_SPEED end, function(v) ADOPT_FOREIGN_SPEED = v end },
+			{ "TELEPORTS", function() return LINEARIZE_TELEPORTS end, function(v) LINEARIZE_TELEPORTS = v end },
+			{ "CLAMP TO GAME", function() return LINEARIZE_CLAMP end, function(v) LINEARIZE_CLAMP = v end },
+			{ "CARRY SAFE", function() return CARRY_SAFE end, function(v) CARRY_SAFE = v end },
+			{ "LINEAR JUMP", function() return LINEAR_JUMP end, function(v) LINEAR_JUMP = v end },
+			{ "AIR JUMP", function() return AIR_JUMP end, function(v) AIR_JUMP = v end },
+			{ "AIR CONTROL", function() return AIR_CONTROL end, function(v) AIR_CONTROL = v end },
+			{ "SLOPE GLUE", function() return SLOPE_GLUE end, function(v) SLOPE_GLUE = v end },
+			{ "STEP ASSIST", function() return STEP_ASSIST end, function(v) STEP_ASSIST = v end },
+			{ "AUDIT", function() return LINEARIZE_AUDIT end, function(v) LINEARIZE_AUDIT = v end },
+		}
+
+		-- Speed row: SPEED_FIXED, 0 meaning "use SPEED_MULT instead".
+		local speedRow = Instance.new("Frame")
+		speedRow.Size = UDim2.new(1, -8, 0, 40)
+		speedRow.BackgroundTransparency = 1
+		speedRow.LayoutOrder = 0
+		speedRow.Parent = tune
+		local function mkSmall(parent, txt, xScale, wScale, color)
+			local b = Instance.new("TextButton")
+			b.Size = UDim2.new(wScale, -3, 1, 0)
+			b.Position = UDim2.new(xScale, 2, 0, 0)
+			b.BackgroundColor3 = color
+			b.BorderSizePixel = 0
+			b.Text = txt
+			b.TextColor3 = Color3.fromRGB(235, 235, 240)
+			b.Font = Enum.Font.GothamBold
+			b.TextSize = 14
+			b.Parent = parent
+			Instance.new("UICorner").Parent = b
+			return b
+		end
+		local minus10 = mkSmall(speedRow, "-10", 0.00, 0.16, Color3.fromRGB(52, 40, 44))
+		local minus1 = mkSmall(speedRow, "-1", 0.16, 0.14, Color3.fromRGB(46, 40, 44))
+		local speedLbl = mkSmall(speedRow, "", 0.30, 0.40, Color3.fromRGB(26, 30, 40))
+		local plus1 = mkSmall(speedRow, "+1", 0.70, 0.14, Color3.fromRGB(40, 48, 44))
+		local plus10 = mkSmall(speedRow, "+10", 0.84, 0.16, Color3.fromRGB(40, 54, 46))
+
+		local function refreshSpeedLbl()
+			if SPEED_FIXED > 0 then
+				speedLbl.Text = ("FIXED %.0f"):format(SPEED_FIXED)
 			else
-				text.Text = (#screenLines > 0) and table.concat(screenLines, "\n") or "waiting for events..."
+				speedLbl.Text = ("MULT x%.2f"):format(SPEED_MULT)
 			end
 		end
+		local function bumpSpeed(d)
+			-- stepping up from 0 leaves multiplier mode and locks an explicit speed
+			SPEED_FIXED = math.max(0, math.floor(SPEED_FIXED + d + 0.5))
+			refreshSpeedLbl()
+			linLog("tune", ("SPEED_FIXED = %.0f"):format(SPEED_FIXED))
+		end
+		minus10.MouseButton1Click:Connect(function() bumpSpeed(-10) end)
+		minus1.MouseButton1Click:Connect(function() bumpSpeed(-1) end)
+		plus1.MouseButton1Click:Connect(function() bumpSpeed(1) end)
+		plus10.MouseButton1Click:Connect(function() bumpSpeed(10) end)
+		speedLbl.MouseButton1Click:Connect(function()
+			SPEED_FIXED = 0 -- back to multiplier mode
+			refreshSpeedLbl()
+			linLog("tune", "SPEED_FIXED = 0 (using SPEED_MULT)")
+		end)
+		refreshSpeedLbl()
 
-		liveBtn.MouseButton1Click:Connect(function()
-			showingPrev = false
-			liveBtn.BackgroundColor3 = Color3.fromRGB(38, 82, 58)
-			prevBtn.BackgroundColor3 = Color3.fromRGB(40, 44, 62)
+		local ON, OFF = Color3.fromRGB(38, 82, 58), Color3.fromRGB(46, 46, 56)
+		for i, entry in ipairs(switches) do
+			local name, get, set = entry[1], entry[2], entry[3]
+			local b = Instance.new("TextButton")
+			b.Size = UDim2.new(1, -8, 0, 34)
+			b.LayoutOrder = i
+			b.BackgroundColor3 = get() and ON or OFF
+			b.BorderSizePixel = 0
+			b.Text = ("%s: %s"):format(name, get() and "ON" or "OFF")
+			b.TextColor3 = Color3.fromRGB(235, 235, 240)
+			b.Font = Enum.Font.GothamBold
+			b.TextSize = 13
+			b.Parent = tune
+			Instance.new("UICorner").Parent = b
+			b.MouseButton1Click:Connect(function()
+				local v = not get()
+				set(v)
+				b.BackgroundColor3 = v and ON or OFF
+				b.Text = ("%s: %s"):format(name, v and "ON" or "OFF")
+				linLog("tune", ("%s = %s"):format(name, tostring(v)))
+			end)
+		end
+
+		local mode = "live"
+		local function paintTabs()
+			liveBtn.BackgroundColor3 = (mode == "live") and ON or OFF
+			prevBtn.BackgroundColor3 = (mode == "prev") and ON or OFF
+			setBtn.BackgroundColor3 = (mode == "set") and ON or OFF
+		end
+		local function render()
+			scroll.Visible = (mode ~= "set")
+			tune.Visible = (mode == "set")
+			if mode == "prev" then
+				text.Text = (#prevLogText > 0) and prevLogText
+					or "No previous session log found.\n\nGet kicked, then run the script again -- the log from the run before will appear here."
+			elseif mode == "live" then
+				text.Text = (#screenLines > 0) and table.concat(screenLines, "\n") or "waiting for events..."
+			end
+			paintTabs()
+		end
+
+		local function setMode(m)
+			mode = m
 			render()
-		end)
-		prevBtn.MouseButton1Click:Connect(function()
-			showingPrev = true
-			prevBtn.BackgroundColor3 = Color3.fromRGB(38, 82, 58)
-			liveBtn.BackgroundColor3 = Color3.fromRGB(40, 44, 62)
-			render()
-		end)
+		end
+		liveBtn.MouseButton1Click:Connect(function() setMode("live") end)
+		prevBtn.MouseButton1Click:Connect(function() setMode("prev") end)
+		setBtn.MouseButton1Click:Connect(function() setMode("set") end)
 		copyBtn.MouseButton1Click:Connect(function()
 			if setclipboard then
 				pcall(setclipboard, text.Text)
@@ -1611,7 +1722,7 @@ if LOG_ON_SCREEN and (LINEARIZE_DEBUG or LINEARIZE_AUDIT) then
 		task.spawn(function()
 			while alive do
 				task.wait(0.25)
-				if panel.Visible and not showingPrev and screenDirty then
+				if panel.Visible and mode == "live" and screenDirty then
 					screenDirty = false
 					render()
 					scroll.CanvasPosition = Vector2.new(0, math.max(0, scroll.AbsoluteCanvasSize.Y))
@@ -1621,11 +1732,10 @@ if LOG_ON_SCREEN and (LINEARIZE_DEBUG or LINEARIZE_AUDIT) then
 
 		-- If a previous log exists, open straight to it: after a kick that is what you came to read.
 		if #prevLogText > 0 then
-			showingPrev = true
-			prevBtn.BackgroundColor3 = Color3.fromRGB(38, 82, 58)
-			liveBtn.BackgroundColor3 = Color3.fromRGB(40, 44, 62)
 			panel.Visible = true
-			render()
+			setMode("prev")
+		else
+			paintTabs()
 		end
 	end)
 end
