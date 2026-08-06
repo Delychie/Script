@@ -34,6 +34,12 @@ local AIR_CONTROL = true    -- steer while airborne (only matters while the cons
 -- faster than that while carrying is precisely what a carry check looks for. Leave this ON.
 local CARRY_SAFE = true
 local CARRY_SLOW_MARGIN = 0.5 -- studs/s below your observed normal speed that counts as "slowed"
+-- A transient speed spike must not become the permanent yardstick, or every later step looks
+-- "slowed". The anchor is your spawn speed, and only rises for a speed that PERSISTS (a real
+-- upgrade), never for a momentary bonus.
+local CARRY_ANCHOR_HOLD = 3   -- seconds a higher speed must persist before it becomes the new normal
+-- Handing movement between native and the constraint at different speeds jolts. Ramp instead.
+local SPEED_RAMP = 60         -- studs/s per second the driven speed may change
 -- Dominance: force other scripts' movement off so only this one moves you.
 -- SUPPRESS_OTHER wipes foreign BodyVelocity/LinearVelocity/etc off your HRP each frame.
 -- MASK_WALKSPEED (>0) pins WalkSpeed to that value so other scripts' WalkSpeed spikes are hidden;
@@ -129,7 +135,9 @@ local knockUntil = 0
 local lastGlueTime = 0
 local lastGlueVy = 0
 local airFloorVX, airFloorVZ = 0, 0
-local baseWalkSpeed = 0   -- the fastest WalkSpeed this life; anything under it means the game slowed you
+local baseWalkSpeed = 0     -- your "normal" speed; anything meaningfully under it means the game slowed you
+local higherSince = 0       -- when a higher-than-normal speed first appeared (for the persistence test)
+local drivenSpeed = 0       -- the ramped speed actually fed to the constraint
 -- transformer state: the latest caught foreign motion, normalized into one intent record
 local linKind: string? = nil         -- "Set" | "Damp" | "Impulse" | "Teleport"
 local linVec = Vector3.zero          -- the velocity that intent wants (or the momentum being bled)
@@ -384,6 +392,8 @@ local function onCharacterAdded(char: Model)
 	lastGlueTime = 0
 	airFloorVX, airFloorVZ = 0, 0
 	baseWalkSpeed = hum.WalkSpeed
+	higherSince = 0
+	drivenSpeed = 0
 
 	-- also suppress step-assist on programmatic jumps (not just JumpRequest input)
 	table.insert(connections, hum.StateChanged:Connect(function(_, new)
@@ -825,6 +835,13 @@ local function disableAll()
 		moveLV.Enabled = false
 		moveLV.PlaneVelocity = Vector2.zero
 	end
+	-- Park the ramp at your real speed so that when the constraint takes over it starts from what
+	-- you are actually doing, instead of stepping from a stale value.
+	local hrp = rootPart
+	if hrp then
+		local v = hrp.AssemblyLinearVelocity
+		drivenSpeed = Vector3.new(v.X, 0, v.Z).Magnitude
+	end
 	airFloorVX, airFloorVZ = 0, 0
 	stopStep()
 end
@@ -849,13 +866,23 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 		hum.WalkSpeed = MASK_WALKSPEED
 	end
 
-	-- Track the fastest speed the game has given you this life. A drop below it means the game
-	-- deliberately slowed you -- carrying something, a debuff, a zone. Note this is read BEFORE any
-	-- standdown so the baseline keeps updating while slowed.
-	if hum.WalkSpeed > baseWalkSpeed then
-		baseWalkSpeed = hum.WalkSpeed
+	-- Maintain the "normal speed" anchor. A speed ABOVE normal only becomes the new normal if it
+	-- persists (a real upgrade); a momentary bonus -- the kind you get on collecting something --
+	-- must not redefine normal, or every step afterwards would read as slowed. Read before any
+	-- standdown so the anchor keeps tracking while slowed.
+	local wsNow = hum.WalkSpeed
+	if wsNow > baseWalkSpeed + CARRY_SLOW_MARGIN then
+		if higherSince == 0 then
+			higherSince = tick()
+		elseif tick() - higherSince >= CARRY_ANCHOR_HOLD then
+			linLog("carry", ("normal speed rose %.1f -> %.1f (persisted)"):format(baseWalkSpeed, wsNow))
+			baseWalkSpeed = wsNow
+			higherSince = 0
+		end
+	else
+		higherSince = 0
 	end
-	local slowed = CARRY_SAFE and baseWalkSpeed > 0 and hum.WalkSpeed < baseWalkSpeed - CARRY_SLOW_MARGIN
+	local slowed = CARRY_SAFE and baseWalkSpeed > 0 and wsNow < baseWalkSpeed - CARRY_SLOW_MARGIN
 
 	-- Diagnostics run before any standdown, so a carry window is still observable -- that window is
 	-- usually the one worth reading.
@@ -988,11 +1015,17 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 		knockUntil = now + 0.3
 	end
 
+	-- Ramp toward the target speed rather than snapping. A carry slow-down ending (or the constraint
+	-- taking over from native movement) otherwise steps the speed instantly, which reads as a jolt --
+	-- and an instantaneous speed change is exactly the shape a displacement check notices.
+	local maxStep = SPEED_RAMP * dt
+	drivenSpeed += math.clamp(effectiveSpeed - drivenSpeed, -maxStep, maxStep)
+
 	if now < knockUntil then
 		move.Enabled = false
 		move.PlaneVelocity = Vector2.zero
 	elseif moving and (grounded or AIR_CONTROL or stepping) then
-		move.PlaneVelocity = Vector2.new(dir.X * effectiveSpeed + baseVX, dir.Z * effectiveSpeed + baseVZ)
+		move.PlaneVelocity = Vector2.new(dir.X * drivenSpeed + baseVX, dir.Z * drivenSpeed + baseVZ)
 		move.Enabled = true
 	else
 		-- idle (or airborne with no air control): let native movement hold/carry you
