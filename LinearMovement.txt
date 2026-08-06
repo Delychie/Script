@@ -39,7 +39,9 @@ local AIR_CONTROL = true    -- steer while airborne (only matters while the cons
 -- any deliberate slow-down -- stand fully down. No boost, no linearizing, no constraints: pure
 -- vanilla movement. The game slowing you is the game telling you how fast you may go, and moving
 -- faster than that while carrying is precisely what a carry check looks for. Leave this ON.
-local CARRY_SAFE = true
+-- CARRY_SAFE = false: your speed setting applies while carrying too, instead of being clamped to
+-- whatever the game slowed you to. Your call -- note the game still knows what speed it granted you.
+local CARRY_SAFE = false
 local CARRY_SLOW_MARGIN = 0.5 -- studs/s below your observed normal speed that counts as "slowed"
 -- A transient speed spike must not become the permanent yardstick, or every later step looks
 -- "slowed". The anchor is your spawn speed, and only rises for a speed that PERSISTS (a real
@@ -69,6 +71,11 @@ local ADOPT_TTL = 0.4         -- seconds an adopted speed stays valid after the 
 -- change is 14 studs/s or 400.
 local SPEED_SMOOTH = 0.12
 local SPEED_SNAP = 0.75       -- below this gap, just take the value; avoids an endless tiny crawl
+-- Force the movement constraint may apply. NOT math.huge: an unbounded force pushed into a wall
+-- keeps building against the contact, and the instant the penetration resolves or you clear the
+-- edge, all of it is released at once and launches you. A finite force just stops pushing.
+-- 50000 moves a ~20-mass character at any sane speed with plenty of headroom for slopes.
+local MOVE_FORCE = 50000
 -- Linear jump. Replaces a mover whose jump is a raw Y velocity write (e.g. Velocity.Y = 50) with a
 -- constraint drive. AIR_JUMP allows repeat jumps mid-air, which is how an infinite jump is built.
 local LINEAR_JUMP = false
@@ -188,6 +195,7 @@ local lastRealWS = 0        -- last non-zero WalkSpeed we observed, kept across 
 local foreignRootActive = false -- a foreign script has WalkSpeed pinned at 0 to monopolise movement
 local foreignSpeed = 0      -- speed read out of another mover's walk writes
 local foreignSpeedUntil = 0 -- when that adopted speed goes stale
+local glideActive = false   -- a caught teleport is being glided; it owns movement while it runs
 local jumpDriveUntil = 0    -- how long the linear jump keeps driving upward
 -- transformer state: the latest caught foreign motion, normalized into one intent record
 local linKind: string? = nil         -- "Set" | "Damp" | "Impulse" | "Teleport"
@@ -267,7 +275,7 @@ local function build()
 	move.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
 	move.PrimaryTangentAxis = Vector3.new(1, 0, 0)
 	move.SecondaryTangentAxis = Vector3.new(0, 0, 1)
-	move.MaxForce = math.huge
+	move.MaxForce = MOVE_FORCE
 	move.PlaneVelocity = Vector2.zero
 	move.Enabled = false
 	move.Parent = rootPart
@@ -278,7 +286,7 @@ local function build()
 	step.RelativeTo = Enum.ActuatorRelativeTo.World
 	step.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
 	step.LineDirection = Vector3.new(0, 1, 0)
-	step.MaxForce = math.huge
+	step.MaxForce = MOVE_FORCE
 	step.LineVelocity = 0
 	step.Enabled = false
 	step.Parent = rootPart
@@ -764,6 +772,7 @@ function logAssemblies(tag: string)
 end
 
 local function stopLinearize()
+	glideActive = false
 	linKind = nil
 	linPosTarget = nil
 	linNoY = false
@@ -945,11 +954,16 @@ local function updateLinearize()
 		end
 	end
 
+	glideActive = false -- re-established below only while a glide is actually running
 	if linPosTarget then
 		local delta = linPosTarget - hrp.Position
 		if delta.Magnitude <= LINEARIZE_REACH then
 			stopLinearize() -- arrived: hand back to normal physics
 		else
+			-- A glide owns movement while it runs. Without this the walk constraint keeps driving
+			-- the same plane toward a different target, and the two fight -- which is what flings
+			-- you during a repeating auto-teleport.
+			glideActive = true
 			-- speed scales with distance and eases as you arrive, capped at LINEARIZE_SPEED
 			local v = delta.Unit * math.min(delta.Magnitude * 8, LINEARIZE_SPEED)
 			-- a teleport IS a vertical command, so drive Y regardless of the gravity preference
@@ -1219,7 +1233,12 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 		drivenSpeed += gap * math.min(1, dt / math.max(SPEED_SMOOTH, 1e-3))
 	end
 
-	if now < knockUntil then
+	if glideActive then
+		-- a caught teleport is being glided and owns the plane; two constraints driving it toward
+		-- different targets is what flings you
+		move.Enabled = false
+		move.PlaneVelocity = Vector2.zero
+	elseif now < knockUntil then
 		move.Enabled = false
 		move.PlaneVelocity = Vector2.zero
 	elseif moving and (grounded or AIR_CONTROL or stepping) then
