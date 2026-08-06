@@ -56,7 +56,12 @@ local TAKEOVER_FALLBACK = 16  -- reference speed if we never observed a real Wal
 local ADOPT_FOREIGN_SPEED = true
 local ADOPT_TTL = 0.4         -- seconds an adopted speed stays valid after the writes stop
 -- Handing movement between native and the constraint at different speeds jolts. Ramp instead.
-local SPEED_RAMP = 60         -- studs/s per second the driven speed may change
+-- Speed smoothing time constant, in seconds. Deliberately a TIME rather than a rate: a fixed
+-- studs/s-per-second rate makes big speed changes take proportionally longer, so the higher the
+-- speed the longer it feels broken. This converges in roughly the same wall-clock time whether the
+-- change is 14 studs/s or 400.
+local SPEED_SMOOTH = 0.12
+local SPEED_SNAP = 0.75       -- below this gap, just take the value; avoids an endless tiny crawl
 -- Linear jump. Replaces a mover whose jump is a raw Y velocity write (e.g. Velocity.Y = 50) with a
 -- constraint drive. AIR_JUMP allows repeat jumps mid-air, which is how an infinite jump is built.
 local LINEAR_JUMP = false
@@ -1196,11 +1201,16 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 		knockUntil = now + 0.3
 	end
 
-	-- Ramp toward the target speed rather than snapping. A carry slow-down ending (or the constraint
+	-- Ease toward the target speed rather than snapping. A carry slow-down ending (or the constraint
 	-- taking over from native movement) otherwise steps the speed instantly, which reads as a jolt --
 	-- and an instantaneous speed change is exactly the shape a displacement check notices.
-	local maxStep = SPEED_RAMP * dt
-	drivenSpeed += math.clamp(effectiveSpeed - drivenSpeed, -maxStep, maxStep)
+	-- Exponential, so the settling time does not grow with the size of the change.
+	local gap = effectiveSpeed - drivenSpeed
+	if math.abs(gap) <= SPEED_SNAP then
+		drivenSpeed = effectiveSpeed
+	else
+		drivenSpeed += gap * math.min(1, dt / math.max(SPEED_SMOOTH, 1e-3))
+	end
 
 	if now < knockUntil then
 		move.Enabled = false
