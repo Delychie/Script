@@ -175,6 +175,7 @@ local linUntil = 0                   -- when this intent expires and we hand bac
 local linStart = 0                   -- when it began (used to shape the Damp/Impulse curve)
 local linPosTarget: Vector3? = nil   -- a caught teleport target to glide to
 local linNoY = false                 -- intent only meant to change horizontal motion; leave Y alone
+local linNoXZ = false                -- intent is vertical only; our own movement owns the horizontal
 local linAngVec = Vector3.zero       -- caught angular velocity to reproduce
 local linAngUntil = 0
 local charGen = 0
@@ -431,6 +432,7 @@ local function onCharacterAdded(char: Model)
 	linKind = nil
 	linPosTarget = nil
 	linNoY = false
+	linNoXZ = false
 	linVec = Vector3.zero
 	linAngVec = Vector3.zero
 	linAngUntil = 0
@@ -742,6 +744,7 @@ local function stopLinearize()
 	linKind = nil
 	linPosTarget = nil
 	linNoY = false
+	linNoXZ = false
 	linVec = Vector3.zero
 	linAngVec = Vector3.zero
 	linAngUntil = 0
@@ -763,11 +766,12 @@ end
 -- noY marks the very common "preserve my Y" idiom, e.g. Velocity = Vector3.new(x, Velocity.Y, z).
 -- That is a horizontal command: the author is explicitly NOT changing vertical motion. Driving Y to
 -- the sampled value would pin your fall speed and cancel gravity's acceleration.
-function noteIntent(kind: string, vec: Vector3, noY: boolean?)
+function noteIntent(kind: string, vec: Vector3, noY: boolean?, noXZ: boolean?)
 	local now = tick()
 	linKind = kind
 	linStart = now
 	linNoY = noY == true
+	linNoXZ = noXZ == true
 	if kind == "Damp" then
 		-- bleed the momentum you ACTUALLY have; "stop" is a brake, not a position hold
 		local hrp = rootPart
@@ -812,8 +816,15 @@ local function applyLinear(vec: Vector3)
 		end
 	end
 	if lin and lin.Parent then
-		lin.PlaneVelocity = Vector2.new(vec.X, vec.Z)
-		lin.Enabled = true
+		if linNoXZ then
+			-- our own movement owns the horizontal axis; a second plane constraint driving it would
+			-- fight the first and fling the character
+			lin.Enabled = false
+			lin.PlaneVelocity = Vector2.zero
+		else
+			lin.PlaneVelocity = Vector2.new(vec.X, vec.Z)
+			lin.Enabled = true
+		end
 	end
 	if linY and linY.Parent then
 		if linNoY then
@@ -1238,14 +1249,21 @@ if (BLOCK_FOREIGN_VELOCITY or SUPPRESS_DURING_RAGDOLL or LINEARIZE_FOREIGN or LI
 						local okCur, cur = pcall(function() return self[key] end)
 						local noY = okCur and typeof(cur) == "Vector3" and math.abs(value.Y - cur.Y) < 0.5
 						-- REPLACE, don't mirror. While we are the primary mover and the player is
-						-- actively walking, a horizontal preserve-Y write is the other script's WALK
-						-- output -- and we are already producing that ourselves from MoveDirection.
-						-- Reproducing it too would put two plane constraints on one attachment
-						-- fighting for the same axis. Drop it and let our own movement stand.
+						-- actively walking, the HORIZONTAL part of a caught write is the other
+						-- script's walk output, and we already produce that ourselves from
+						-- MoveDirection. Letting it through as well would put two plane constraints
+						-- on one attachment fighting for the same axis, which flings the character.
+						-- The VERTICAL part is different -- that is a jump or a launch, which our
+						-- walking does not produce -- so it is kept unless we make our own jumps.
 						local hum = humanoid
-						if LINEAR_PRIMARY and noY and not knocked
+						if LINEAR_PRIMARY and not knocked
 							and hum and hum.MoveDirection.Magnitude > 0.01
 							and value.Magnitude > 0.05 then
+							if noY or LINEAR_JUMP then
+								return -- purely their walk output, or we produce our own jumps: drop it
+							end
+							-- keep the vertical only; our movement owns the horizontal
+							noteIntent("Set", Vector3.new(0, value.Y, 0), false, true)
 							return
 						end
 						noteIntent(value.Magnitude < 0.05 and "Damp" or "Set", value, noY)
