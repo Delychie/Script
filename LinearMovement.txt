@@ -48,6 +48,13 @@ local CARRY_ANCHOR_HOLD = 3   -- seconds a higher speed must persist before it b
 -- constraint as the only mover.
 local LINEAR_TAKEOVER = true
 local TAKEOVER_FALLBACK = 16  -- reference speed if we never observed a real WalkSpeed (loaded late)
+-- ADOPT_FOREIGN_SPEED: when another mover's walk write is caught, take its SPEED and feed that into
+-- the reference-speed rule, instead of reproducing its vector or discarding it. The other script's
+-- speed control keeps working -- move its slider and you actually change speed -- but the motion is
+-- produced by our constraint from MoveDirection. Its velocity write never lands either way.
+-- SPEED_FIXED still wins if set, and a carry slow-down still clamps on top.
+local ADOPT_FOREIGN_SPEED = true
+local ADOPT_TTL = 0.4         -- seconds an adopted speed stays valid after the writes stop
 -- Handing movement between native and the constraint at different speeds jolts. Ramp instead.
 local SPEED_RAMP = 60         -- studs/s per second the driven speed may change
 -- Linear jump. Replaces a mover whose jump is a raw Y velocity write (e.g. Velocity.Y = 50) with a
@@ -167,6 +174,8 @@ local higherSince = 0       -- when a higher-than-normal speed first appeared (f
 local drivenSpeed = 0       -- the ramped speed actually fed to the constraint
 local lastRealWS = 0        -- last non-zero WalkSpeed we observed, kept across a foreign zeroing
 local foreignRootActive = false -- a foreign script has WalkSpeed pinned at 0 to monopolise movement
+local foreignSpeed = 0      -- speed read out of another mover's walk writes
+local foreignSpeedUntil = 0 -- when that adopted speed goes stale
 local jumpDriveUntil = 0    -- how long the linear jump keeps driving upward
 -- transformer state: the latest caught foreign motion, normalized into one intent record
 local linKind: string? = nil         -- "Set" | "Damp" | "Impulse" | "Teleport"
@@ -445,6 +454,8 @@ local function onCharacterAdded(char: Model)
 	drivenSpeed = 0
 	jumpDriveUntil = 0
 	foreignRootActive = false
+	foreignSpeed = 0
+	foreignSpeedUntil = 0
 	if hum.WalkSpeed > 0.01 then
 		lastRealWS = hum.WalkSpeed
 	end
@@ -1072,7 +1083,16 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	-- referenceSpeed sees through a foreign zeroing of WalkSpeed; genuine rooting still reads as 0
 	local gameWS = referenceSpeed()
 	local rooted = gameWS <= 0.01
-	local effectiveSpeed = (SPEED_FIXED > 0) and SPEED_FIXED or (gameWS * SPEED_MULT)
+	-- Precedence: an explicit SPEED_FIXED wins; otherwise a freshly adopted foreign speed (so their
+	-- speed control still means something); otherwise the game's own speed times SPEED_MULT.
+	local effectiveSpeed
+	if SPEED_FIXED > 0 then
+		effectiveSpeed = SPEED_FIXED
+	elseif ADOPT_FOREIGN_SPEED and foreignSpeed > 0 and tick() < foreignSpeedUntil then
+		effectiveSpeed = foreignSpeed
+	else
+		effectiveSpeed = gameWS * SPEED_MULT
+	end
 	-- While the game has you slowed, never exceed the speed it just handed you. In primary mode we
 	-- keep driving (the constraint stays the mover) but at exactly the game's speed, so the mechanism
 	-- is still linear and the speed is still whatever the game says it should be.
@@ -1259,6 +1279,19 @@ if (BLOCK_FOREIGN_VELOCITY or SUPPRESS_DURING_RAGDOLL or LINEARIZE_FOREIGN or LI
 						if LINEAR_PRIMARY and not knocked
 							and hum and hum.MoveDirection.Magnitude > 0.01
 							and value.Magnitude > 0.05 then
+							-- Adopt the SPEED before discarding the vector. This is what keeps the
+							-- other script's speed control meaningful: its slider still decides how
+							-- fast you go, we just produce the motion ourselves.
+							if ADOPT_FOREIGN_SPEED then
+								local mag = math.sqrt(value.X * value.X + value.Z * value.Z)
+								if mag > 0.05 then
+									if math.abs(mag - foreignSpeed) > 1 then
+										linLog("adopt", ("speed %.1f -> %.1f from a caught walk write"):format(foreignSpeed, mag))
+									end
+									foreignSpeed = mag
+									foreignSpeedUntil = tick() + ADOPT_TTL
+								end
+							end
 							if noY or LINEAR_JUMP then
 								return -- purely their walk output, or we produce our own jumps: drop it
 							end
