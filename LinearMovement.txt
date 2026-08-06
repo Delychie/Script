@@ -138,7 +138,13 @@ local LINEARIZE_FORCE = 50000    -- finite force; math.huge snaps hard and reads
 -- foreign mover asking for 27 studs/s while your WalkSpeed says 20.4 gets reproduced at 20.4. This
 -- makes the transformer a speed LIMIT rather than a passthrough -- the caught script keeps its
 -- direction and its behaviour, it just cannot move you faster than the game says you may go.
+-- Clamps reproduced motion to YOUR configured speed (SPEED_FIXED / SPEED_MULT), not to the game's
+-- raw WalkSpeed -- otherwise any path that reproduces rather than replaces silently ignores your
+-- speed setting and pins you to whatever the game happens to allow.
 local LINEARIZE_CLAMP = true
+-- Keep steering while a caught teleport glides you. Without this the glide owns both axes for its
+-- whole duration, which feels like a stun -- most noticeable on a repeating downward auto-teleport.
+local GLIDE_STEER = true
 -- Coverage: a velocity write only has to land on SOME part of your assembly to move all of you, and
 -- plenty of scripts move you by method call or by parenting a mover instead of writing a property.
 local LINEARIZE_WHOLE_RIG = true -- catch writes on any part of your character, not just the HRP
@@ -196,6 +202,7 @@ local foreignRootActive = false -- a foreign script has WalkSpeed pinned at 0 to
 local foreignSpeed = 0      -- speed read out of another mover's walk writes
 local foreignSpeedUntil = 0 -- when that adopted speed goes stale
 local glideActive = false   -- a caught teleport is being glided; it owns movement while it runs
+local speedLimit = 0        -- your configured speed this frame, used to cap reproduced motion
 local jumpDriveUntil = 0    -- how long the linear jump keeps driving upward
 -- transformer state: the latest caught foreign motion, normalized into one intent record
 local linKind: string? = nil         -- "Set" | "Damp" | "Impulse" | "Teleport"
@@ -835,7 +842,9 @@ local function applyLinear(vec: Vector3)
 	-- falls are not walking, and WalkSpeed says nothing about them.
 	if LINEARIZE_CLAMP then
 		local hum = humanoid
-		local limit = hum and hum.WalkSpeed or nil
+		-- YOUR speed is the ceiling, not the game's raw WalkSpeed. Using WalkSpeed here meant any
+		-- path that reproduces motion (rather than replacing it) ignored your setting entirely.
+		local limit = (speedLimit > 0) and speedLimit or (hum and hum.WalkSpeed or nil)
 		if limit then
 			local hx, hz = vec.X, vec.Z
 			local mag = math.sqrt(hx * hx + hz * hz)
@@ -960,21 +969,31 @@ local function updateLinearize()
 		if delta.Magnitude <= LINEARIZE_REACH then
 			stopLinearize() -- arrived: hand back to normal physics
 		else
-			-- A glide owns movement while it runs. Without this the walk constraint keeps driving
-			-- the same plane toward a different target, and the two fight -- which is what flings
-			-- you during a repeating auto-teleport.
-			glideActive = true
 			-- speed scales with distance and eases as you arrive, capped at LINEARIZE_SPEED
 			local v = delta.Unit * math.min(delta.Magnitude * 8, LINEARIZE_SPEED)
-			-- a teleport IS a vertical command, so drive Y regardless of the gravity preference
+			-- Steering: while you are actively giving movement input, hand the HORIZONTAL axis back
+			-- to the walk constraint and let the glide drive only Y. The two never touch the same
+			-- axis, so there is no fight -- you just keep control of where you go on the way down.
+			-- With no input the glide owns both axes, so a sideways teleport still arrives.
+			local hum = humanoid
+			local steering = GLIDE_STEER and hum and hum.MoveDirection.Magnitude > 0.01
 			if linLV and linLV.Parent then
-				linLV.PlaneVelocity = Vector2.new(v.X, v.Z)
-				linLV.Enabled = true
+				if steering then
+					linLV.Enabled = false
+					linLV.PlaneVelocity = Vector2.zero
+				else
+					linLV.PlaneVelocity = Vector2.new(v.X, v.Z)
+					linLV.Enabled = true
+				end
 			end
+			-- a teleport IS a vertical command, so drive Y regardless of the gravity preference
 			if linYLV and linYLV.Parent then
 				linYLV.LineVelocity = v.Y
 				linYLV.Enabled = true
 			end
+			-- only claim ownership of movement when we are actually driving the horizontal plane;
+			-- claiming it while steering would disable the very walk constraint doing the steering
+			glideActive = not steering
 		end
 		return
 	end
@@ -1119,6 +1138,8 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 		speedBase = foreignSpeed
 	end
 	local effectiveSpeed = (SPEED_FIXED > 0) and SPEED_FIXED or (speedBase * SPEED_MULT)
+	-- publish it so reproduced motion is capped at your speed too, not the game's raw WalkSpeed
+	speedLimit = effectiveSpeed
 	-- While the game has you slowed, never exceed the speed it just handed you. In primary mode we
 	-- keep driving (the constraint stays the mover) but at exactly the game's speed, so the mechanism
 	-- is still linear and the speed is still whatever the game says it should be.
@@ -1589,6 +1610,7 @@ if LOG_ON_SCREEN and (LINEARIZE_DEBUG or LINEARIZE_AUDIT) then
 			{ "CONVERT FOREIGN", function() return LINEARIZE_FOREIGN end, function(v) LINEARIZE_FOREIGN = v end },
 			{ "ADOPT SPEED", function() return ADOPT_FOREIGN_SPEED end, function(v) ADOPT_FOREIGN_SPEED = v end },
 			{ "TELEPORTS", function() return LINEARIZE_TELEPORTS end, function(v) LINEARIZE_TELEPORTS = v end },
+			{ "STEER WHILE TP", function() return GLIDE_STEER end, function(v) GLIDE_STEER = v end },
 			{ "CLAMP TO GAME", function() return LINEARIZE_CLAMP end, function(v) LINEARIZE_CLAMP = v end },
 			{ "CARRY SAFE", function() return CARRY_SAFE end, function(v) CARRY_SAFE = v end },
 			{ "LINEAR JUMP", function() return LINEAR_JUMP end, function(v) LINEAR_JUMP = v end },
