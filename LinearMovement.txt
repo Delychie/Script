@@ -92,6 +92,11 @@ local LINEARIZE_TTL = 0.15       -- how long a caught Set keeps driving (seconds
 local LINEARIZE_DAMP_TIME = 0.12 -- how long a Damp takes to bleed momentum to zero (seconds)
 local LINEARIZE_DECAY = 2.5      -- decay rate for Impulse intents (higher = settles sooner)
 local LINEARIZE_FORCE = 50000    -- finite force; math.huge snaps hard and reads as teleport-y
+-- Governor: when reproducing caught motion, never exceed the speed the game currently allows. A
+-- foreign mover asking for 27 studs/s while your WalkSpeed says 20.4 gets reproduced at 20.4. This
+-- makes the transformer a speed LIMIT rather than a passthrough -- the caught script keeps its
+-- direction and its behaviour, it just cannot move you faster than the game says you may go.
+local LINEARIZE_CLAMP = true
 -- Coverage: a velocity write only has to land on SOME part of your assembly to move all of you, and
 -- plenty of scripts move you by method call or by parenting a mover instead of writing a property.
 local LINEARIZE_WHOLE_RIG = true -- catch writes on any part of your character, not just the HRP
@@ -707,6 +712,22 @@ end
 -- LINEARIZE_GRAVITY is off), so you keep falling normally instead of hanging in the air.
 local function applyLinear(vec: Vector3)
 	local lin, linY = linLV, linYLV
+	-- Clamp horizontal speed to what the game currently permits. Vertical is left alone: jumps and
+	-- falls are not walking, and WalkSpeed says nothing about them.
+	if LINEARIZE_CLAMP then
+		local hum = humanoid
+		local limit = hum and hum.WalkSpeed or nil
+		if limit then
+			local hx, hz = vec.X, vec.Z
+			local mag = math.sqrt(hx * hx + hz * hz)
+			if limit <= 0.01 then
+				vec = Vector3.new(0, vec.Y, 0) -- rooted means rooted
+			elseif mag > limit then
+				local s = limit / mag
+				vec = Vector3.new(hx * s, vec.Y, hz * s)
+			end
+		end
+	end
 	if lin and lin.Parent then
 		lin.PlaneVelocity = Vector2.new(vec.X, vec.Z)
 		lin.Enabled = true
