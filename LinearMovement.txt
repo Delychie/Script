@@ -38,8 +38,24 @@ local CARRY_SLOW_MARGIN = 0.5 -- studs/s below your observed normal speed that c
 -- "slowed". The anchor is your spawn speed, and only rises for a speed that PERSISTS (a real
 -- upgrade), never for a momentary bonus.
 local CARRY_ANCHOR_HOLD = 3   -- seconds a higher speed must persist before it becomes the new normal
+-- TAKEOVER. A velocity-based mover typically zeroes WalkSpeed so native humanoid movement stops
+-- competing with its writes. That reads here as "rooted", this script stands down, and movement is
+-- handed straight back to the mover you were trying to replace -- which is why a takeover cannot get
+-- off the ground without this. With takeover on, a zeroed WalkSpeed that no rooting STATE explains is
+-- treated as monopolisation: we keep the last real speed as our reference and drive anyway. Genuine
+-- rooting (Seated, Dead, PlatformStand) is still respected exactly as before.
+-- The zeroing is left in place on purpose -- native movement staying off is what leaves the
+-- constraint as the only mover.
+local LINEAR_TAKEOVER = true
+local TAKEOVER_FALLBACK = 16  -- reference speed if we never observed a real WalkSpeed (loaded late)
 -- Handing movement between native and the constraint at different speeds jolts. Ramp instead.
 local SPEED_RAMP = 60         -- studs/s per second the driven speed may change
+-- Linear jump. Replaces a mover whose jump is a raw Y velocity write (e.g. Velocity.Y = 50) with a
+-- constraint drive. AIR_JUMP allows repeat jumps mid-air, which is how an infinite jump is built.
+local LINEAR_JUMP = false
+local JUMP_VELOCITY = 50      -- upward studs/s
+local JUMP_DRIVE_TIME = 0.12  -- how long the upward drive is held before gravity takes back over
+local AIR_JUMP = false        -- allow jumping again while already airborne
 -- Dominance: force other scripts' movement off so only this one moves you.
 -- SUPPRESS_OTHER wipes foreign BodyVelocity/LinearVelocity/etc off your HRP each frame.
 -- MASK_WALKSPEED (>0) pins WalkSpeed to that value so other scripts' WalkSpeed spikes are hidden;
@@ -81,7 +97,7 @@ local FLOOR_VEL_DEADZONE = 0.25
 --   Teleport (CFrame/Position =)    -> glide to the target, easing in
 -- Damp is why zeroing writes don't freeze you: an anti-ragdoll that writes Velocity = 0 every frame
 -- is asking you to stop, not asking to be pinned in mid-air.
-local LINEARIZE_FOREIGN = false  -- master toggle for the transformer
+local LINEARIZE_FOREIGN = true   -- master toggle for the transformer
 local LINEARIZE_TELEPORTS = true -- also catch CFrame/Position teleports, not just velocity writes
 local LINEARIZE_RAGDOLL = true   -- linearize while knocked too, instead of dropping the writes
 local LINEARIZE_ANGULAR = true   -- reproduce spin/tumble (RotVelocity) as well as travel
@@ -134,6 +150,7 @@ local stepLV: LinearVelocity? = nil
 local linLV: LinearVelocity? = nil     -- horizontal (XZ plane) reproduction
 local linYLV: LinearVelocity? = nil    -- vertical (Y line), only when an intent is truly vertical
 local linAV: AngularVelocity? = nil    -- spin/tumble reproduction
+local jumpLV: LinearVelocity? = nil    -- linear jump drive (Y line)
 local rayParams: RaycastParams? = nil
 
 local footOffset = 3
@@ -148,6 +165,9 @@ local airFloorVX, airFloorVZ = 0, 0
 local baseWalkSpeed = 0     -- your "normal" speed; anything meaningfully under it means the game slowed you
 local higherSince = 0       -- when a higher-than-normal speed first appeared (for the persistence test)
 local drivenSpeed = 0       -- the ramped speed actually fed to the constraint
+local lastRealWS = 0        -- last non-zero WalkSpeed we observed, kept across a foreign zeroing
+local foreignRootActive = false -- a foreign script has WalkSpeed pinned at 0 to monopolise movement
+local jumpDriveUntil = 0    -- how long the linear jump keeps driving upward
 -- transformer state: the latest caught foreign motion, normalized into one intent record
 local linKind: string? = nil         -- "Set" | "Damp" | "Impulse" | "Teleport"
 local linVec = Vector3.zero          -- the velocity that intent wants (or the momentum being bled)
@@ -189,6 +209,7 @@ local function teardown()
 	if linLV then linLV:Destroy() linLV = nil end
 	if linYLV then linYLV:Destroy() linYLV = nil end
 	if linAV then linAV:Destroy() linAV = nil end
+	if jumpLV then jumpLV:Destroy() jumpLV = nil end
 	if attachment then attachment:Destroy() attachment = nil end
 end
 
@@ -276,12 +297,25 @@ local function build()
 	spin.Enabled = false
 	spin.Parent = rootPart
 
+	-- separate from stepLV so a jump never fights step-assist or slope-glue for the Y axis
+	local jump = Instance.new("LinearVelocity")
+	jump.Name = "LinearJump"
+	jump.Attachment0 = att
+	jump.RelativeTo = Enum.ActuatorRelativeTo.World
+	jump.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
+	jump.LineDirection = Vector3.new(0, 1, 0)
+	jump.MaxForce = LINEARIZE_FORCE
+	jump.LineVelocity = 0
+	jump.Enabled = false
+	jump.Parent = rootPart
+
 	attachment = att
 	moveLV = move
 	stepLV = step
 	linLV = lin
 	linYLV = linY
 	linAV = spin
+	jumpLV = jump
 end
 
 local function computeFootOffset(char: Model, hum: Humanoid, hrp: BasePart): number
@@ -407,6 +441,11 @@ local function onCharacterAdded(char: Model)
 	baseWalkSpeed = hum.WalkSpeed
 	higherSince = 0
 	drivenSpeed = 0
+	jumpDriveUntil = 0
+	foreignRootActive = false
+	if hum.WalkSpeed > 0.01 then
+		lastRealWS = hum.WalkSpeed
+	end
 
 	-- also suppress step-assist on programmatic jumps (not just JumpRequest input)
 	table.insert(connections, hum.StateChanged:Connect(function(_, new)
@@ -495,6 +534,49 @@ local function isKnockedState(): boolean
 		or st == Enum.HumanoidStateType.GettingUp
 end
 
+-- Is WalkSpeed zero because the GAME rooted us, or because a foreign mover zeroed it to keep native
+-- movement out of its way? Only a rooting STATE justifies a genuine root; anything else with a
+-- remembered real speed is monopolisation, and standing down for it just hands movement back.
+local function foreignRooted(): boolean
+	local hum = humanoid
+	if not LINEAR_TAKEOVER or not hum or not foreignRootActive then
+		return false
+	end
+	if hum.WalkSpeed > 0.01 then
+		return false
+	end
+	if hum.PlatformStand then
+		return false
+	end
+	local st = hum:GetState()
+	if st == Enum.HumanoidStateType.Seated
+		or st == Enum.HumanoidStateType.Dead
+		or st == Enum.HumanoidStateType.PlatformStanding then
+		return false -- the game really does mean "you may not move"
+	end
+	return true
+end
+
+-- The speed we drive at. Normally the live WalkSpeed; during a foreign root, the last real speed we
+-- saw, so a mover cannot silence us just by zeroing the property.
+local function referenceSpeed(): number
+	local hum = humanoid
+	local ws = hum and hum.WalkSpeed or 0
+	if ws > 0.01 then
+		return ws
+	end
+	if foreignRooted() then
+		if lastRealWS > 0.01 then
+			return lastRealWS
+		end
+		if baseWalkSpeed > 0.01 then
+			return baseWalkSpeed
+		end
+		return TAKEOVER_FALLBACK
+	end
+	return 0
+end
+
 local function feetY(): number?
 	local hrp = rootPart
 	if not hrp then
@@ -545,7 +627,8 @@ end
 
 local OURS = {
 	LinearMove = true, LinearStep = true, LinearForce = true,
-	LinearForceY = true, LinearSpin = true, LinearMoveAttachment = true,
+	LinearForceY = true, LinearSpin = true, LinearJump = true,
+	LinearMoveAttachment = true,
 }
 local function suppressForeign()
 	local hrp = rootPart
@@ -890,6 +973,30 @@ end
 table.insert(connections, UserInputService.JumpRequest:Connect(function()
 	jumpSuppressUntil = tick() + 0.25
 	stopStep()
+	if LINEAR_JUMP then
+		local hum = humanoid
+		local airborne = hum and hum.FloorMaterial == Enum.Material.Air
+		-- on the ground, or in the air only when air-jumping is allowed
+		if hum and (not airborne or AIR_JUMP) then
+			jumpDriveUntil = tick() + JUMP_DRIVE_TIME
+		end
+	end
+end))
+
+-- Drive the jump on its own constraint. Separate from the movement Heartbeat so it still fires while
+-- the character is in states the movement path bails out of (mid-air, for repeat jumps).
+table.insert(connections, RunService.Heartbeat:Connect(function()
+	local jump = jumpLV
+	if not jump or not jump.Parent then
+		return
+	end
+	if LINEAR_JUMP and tick() < jumpDriveUntil then
+		jump.LineVelocity = JUMP_VELOCITY
+		jump.Enabled = true
+	elseif jump.Enabled then
+		jump.Enabled = false
+		jump.LineVelocity = 0
+	end
 end))
 
 table.insert(connections, RunService.Heartbeat:Connect(function(dt)
@@ -911,7 +1018,8 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	-- persists (a real upgrade); a momentary bonus -- the kind you get on collecting something --
 	-- must not redefine normal, or every step afterwards would read as slowed. Read before any
 	-- standdown so the anchor keeps tracking while slowed.
-	local wsNow = hum.WalkSpeed
+	-- reference speed, not the raw property: a foreign zeroing is not a carry slow-down
+	local wsNow = referenceSpeed()
 	if wsNow > baseWalkSpeed + CARRY_SLOW_MARGIN then
 		if higherSince == 0 then
 			higherSince = tick()
@@ -950,7 +1058,8 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 		return
 	end
 
-	local gameWS = hum.WalkSpeed
+	-- referenceSpeed sees through a foreign zeroing of WalkSpeed; genuine rooting still reads as 0
+	local gameWS = referenceSpeed()
 	local rooted = gameWS <= 0.01
 	local effectiveSpeed = (SPEED_FIXED > 0) and SPEED_FIXED or (gameWS * SPEED_MULT)
 	-- While the game has you slowed, never exceed the speed it just handed you. In primary mode we
@@ -1090,11 +1199,27 @@ local function cleanup()
 end
 _G.__LinearMovementCleanup = cleanup
 
-if (BLOCK_FOREIGN_VELOCITY or SUPPRESS_DURING_RAGDOLL or LINEARIZE_FOREIGN or LINEARIZE_DEBUG)
-	and hookmetamethod and newcclosure then
+if (BLOCK_FOREIGN_VELOCITY or SUPPRESS_DURING_RAGDOLL or LINEARIZE_FOREIGN or LINEARIZE_DEBUG
+	or LINEAR_TAKEOVER) and hookmetamethod and newcclosure then
 	pcall(function()
 		local realNewindex
 		realNewindex = hookmetamethod(game, "__newindex", newcclosure(function(self, key, value)
+			-- Watch WalkSpeed on our own Humanoid. A mover zeroing it is how it stops native movement
+			-- competing; remembering the last real value is what lets takeover drive through it.
+			-- The write is passed through untouched -- native movement staying off is useful.
+			if self == humanoid and key == "WalkSpeed" and type(value) == "number" then
+				if value > 0.01 then
+					lastRealWS = value
+					if foreignRootActive then
+						foreignRootActive = false
+						linLog("takeover", ("WalkSpeed restored to %.1f"):format(value))
+					end
+				elseif not foreignRootActive then
+					foreignRootActive = true
+					linLog("takeover", ("WalkSpeed zeroed by another script (last real %.1f)"):format(lastRealWS))
+				end
+				return realNewindex(self, key, value)
+			end
 			-- A velocity write to ANY part of the assembly moves all of you, so match the whole rig,
 			-- not just the HRP. ourParts is a precomputed set because this runs on every property
 			-- write in the game and must not walk the tree.
@@ -1112,6 +1237,17 @@ if (BLOCK_FOREIGN_VELOCITY or SUPPRESS_DURING_RAGDOLL or LINEARIZE_FOREIGN or LI
 						-- recurse. If the new Y matches the current Y the writer is preserving it.
 						local okCur, cur = pcall(function() return self[key] end)
 						local noY = okCur and typeof(cur) == "Vector3" and math.abs(value.Y - cur.Y) < 0.5
+						-- REPLACE, don't mirror. While we are the primary mover and the player is
+						-- actively walking, a horizontal preserve-Y write is the other script's WALK
+						-- output -- and we are already producing that ourselves from MoveDirection.
+						-- Reproducing it too would put two plane constraints on one attachment
+						-- fighting for the same axis. Drop it and let our own movement stand.
+						local hum = humanoid
+						if LINEAR_PRIMARY and noY and not knocked
+							and hum and hum.MoveDirection.Magnitude > 0.01
+							and value.Magnitude > 0.05 then
+							return
+						end
 						noteIntent(value.Magnitude < 0.05 and "Damp" or "Set", value, noY)
 						return
 					end
