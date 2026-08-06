@@ -782,11 +782,16 @@ local function auditVelocity()
 		auditLastReport = now
 		local hum = humanoid
 		local driving = (linLV and linLV.Enabled) or (linYLV and linYLV.Enabled)
-		logEmit(("AUDIT unexplained=%.1f actual=%.1f cmd=%.1f state=%s floor=%s moveDir=%.2f linearDriving=%s")
+		-- ws/rooted are here because a zeroed WalkSpeed is the single most common reason the
+		-- constraint reports cmd=0: rooting is respected, so WalkSpeed 0 means we must not move you.
+		local ws = hum and hum.WalkSpeed or -1
+		logEmit(("AUDIT unexplained=%.1f actual=%.1f cmd=%.1f ws=%.1f rooted=%s state=%s floor=%s moveDir=%.2f linearDriving=%s")
 			:format(
 				unexplained,
 				Vector3.new(vel.X, 0, vel.Z).Magnitude,
 				Vector3.new(cmd.X, 0, cmd.Z).Magnitude,
+				ws,
+				tostring(ws <= 0.01),
 				hum and tostring(hum:GetState()) or "?",
 				hum and tostring(hum.FloorMaterial) or "?",
 				hum and hum.MoveDirection.Magnitude or 0,
