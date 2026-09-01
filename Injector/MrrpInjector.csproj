@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>MrrpInjector</RootNamespace>
+    <AssemblyName>MrrpInjector</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <!-- The Win32 injection APIs are architecture-sensitive: a 64-bit target
+         can only inject a 64-bit DLL into a 64-bit process. Roblox is x64, so
+         we build x64 only and never let the runtime fall back to AnyCPU. -->
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+
+    <Version>1.0.0</Version>
+    <Product>mrrpbot society injector</Product>
+    <Company>mrrpbot society</Company>
+    <Description>A clean Windows DLL injector for the mrrpbot society.</Description>
+  </PropertyGroup>
+
+</Project>

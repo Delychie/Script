@@ -1,0 +1,56 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ================================================================
+         mrrpbot society palette — deep indigo night + neon cat accents
+         ================================================================ -->
+
+    <!-- Surfaces -->
+    <Color x:Key="Bg0">#0B0A14</Color>   <!-- window base           -->
+    <Color x:Key="Bg1">#12101F</Color>   <!-- card / panel          -->
+    <Color x:Key="Bg2">#1A1730</Color>   <!-- inset / list          -->
+    <Color x:Key="Bg3">#242040</Color>   <!-- hover                 -->
+    <Color x:Key="Stroke">#2E2A4D</Color><!-- hairline borders      -->
+
+    <!-- Text -->
+    <Color x:Key="Text0">#F4F2FF</Color> <!-- primary               -->
+    <Color x:Key="Text1">#B8B2D8</Color> <!-- secondary             -->
+    <Color x:Key="Text2">#6E688F</Color> <!-- muted                 -->
+
+    <!-- Accents -->
+    <Color x:Key="AccentA">#B14CFF</Color> <!-- society violet       -->
+    <Color x:Key="AccentB">#FF5FC8</Color> <!-- mrrp pink            -->
+    <Color x:Key="AccentC">#37E0C4</Color> <!-- ok / mint            -->
+    <Color x:Key="Danger">#FF5470</Color>  <!-- fail / red           -->
+
+    <!-- ================================================================ -->
+
+    <SolidColorBrush x:Key="Bg0Brush"    Color="{StaticResource Bg0}" />
+    <SolidColorBrush x:Key="Bg1Brush"    Color="{StaticResource Bg1}" />
+    <SolidColorBrush x:Key="Bg2Brush"    Color="{StaticResource Bg2}" />
+    <SolidColorBrush x:Key="Bg3Brush"    Color="{StaticResource Bg3}" />
+    <SolidColorBrush x:Key="StrokeBrush" Color="{StaticResource Stroke}" />
+
+    <SolidColorBrush x:Key="Text0Brush"  Color="{StaticResource Text0}" />
+    <SolidColorBrush x:Key="Text1Brush"  Color="{StaticResource Text1}" />
+    <SolidColorBrush x:Key="Text2Brush"  Color="{StaticResource Text2}" />
+
+    <SolidColorBrush x:Key="AccentABrush" Color="{StaticResource AccentA}" />
+    <SolidColorBrush x:Key="AccentBBrush" Color="{StaticResource AccentB}" />
+    <SolidColorBrush x:Key="AccentCBrush" Color="{StaticResource AccentC}" />
+    <SolidColorBrush x:Key="DangerBrush"  Color="{StaticResource Danger}" />
+
+    <!-- The signature society gradient: violet → pink, used on the brand,
+         the primary action, and the header rule. -->
+    <LinearGradientBrush x:Key="SocietyBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="{StaticResource AccentA}" Offset="0" />
+        <GradientStop Color="{StaticResource AccentB}" Offset="1" />
+    </LinearGradientBrush>
+
+    <LinearGradientBrush x:Key="WindowBrush" StartPoint="0,0" EndPoint="0.6,1">
+        <GradientStop Color="#0B0A14" Offset="0" />
+        <GradientStop Color="#0E0C1B" Offset="0.55" />
+        <GradientStop Color="#120E22" Offset="1" />
+    </LinearGradientBrush>
+
+</ResourceDictionary>
