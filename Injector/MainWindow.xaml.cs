@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Documents;
 using System.Windows.Input;
@@ -9,18 +10,18 @@ using FsocietyInjector.Services;
 namespace FsocietyInjector;
 
 /// <summary>
-/// A Command Prompt front end for the injector. Everything is typed into a
-/// console view. The one way to inject is:
+/// A Command Prompt front end for the injector. The one way to inject is:
 ///
-///     C:\fsociety>dll inject
+///     C:\Windows\system32>dll inject
 ///     DLL path: &lt;paste the .dll path&gt;
 ///     Process path: &lt;paste the target's .exe path&gt;
 ///
-/// which resolves the running process from that exe path and injects.
+/// The DLL and process paths are remembered between sessions and pre-filled
+/// the next time you run <c>dll inject</c>.
 /// </summary>
 public partial class MainWindow : Window
 {
-    private const string CmdPrompt = "C:\\fsociety>";
+    private const string CmdPrompt = "C:\\Windows\\system32>";
 
     private enum Mode { Command, AskDll, AskProc }
 
@@ -30,7 +31,15 @@ public partial class MainWindow : Window
     private bool _busy;
 
     private Paragraph _par = null!;
-    private Brush _fg = null!, _dim = null!, _white = null!, _green = null!, _red = null!, _yellow = null!;
+    private Brush _fg = null!, _dim = null!, _green = null!, _red = null!, _yellow = null!;
+
+    // --- persisted choices (last DLL + last process path) ---
+    private static readonly string CfgPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "fsociety", "injector.json");
+
+    private sealed class Settings { public string? Dll { get; set; } public string? Proc { get; set; } }
+    private Settings _cfg = new();
 
     public MainWindow()
     {
@@ -38,7 +47,6 @@ public partial class MainWindow : Window
 
         _fg     = (Brush)FindResource("FgBrush");
         _dim    = (Brush)FindResource("DimBrush");
-        _white  = (Brush)FindResource("WhiteBrush");
         _green  = (Brush)FindResource("GreenBrush");
         _red    = (Brush)FindResource("RedBrush");
         _yellow = (Brush)FindResource("YellowBrush");
@@ -47,7 +55,30 @@ public partial class MainWindow : Window
         Doc.Blocks.Clear();
         Doc.Blocks.Add(_par);
 
+        LoadCfg();
         Loaded += (_, _) => { Boot(); Cmd.Focus(); };
+    }
+
+    // ============================ persistence ============================
+
+    private void LoadCfg()
+    {
+        try
+        {
+            if (File.Exists(CfgPath))
+                _cfg = JsonSerializer.Deserialize<Settings>(File.ReadAllText(CfgPath)) ?? new Settings();
+        }
+        catch { _cfg = new Settings(); }
+    }
+
+    private void SaveCfg()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(CfgPath)!);
+            File.WriteAllText(CfgPath, JsonSerializer.Serialize(_cfg));
+        }
+        catch { /* best effort — a read-only profile just means no memory */ }
     }
 
     // ============================ window chrome ============================
@@ -93,15 +124,29 @@ public partial class MainWindow : Window
         _par.Inlines.Add(new LineBreak());
     }
 
+    /// <summary>
+    /// Switches input mode, updates the prompt, and — for the DLL/process
+    /// steps — pre-fills the field with the value remembered from last time.
+    /// </summary>
     private void SetMode(Mode mode)
     {
         _mode = mode;
-        PromptLabel.Text = mode switch
+        switch (mode)
         {
-            Mode.AskDll  => "DLL path: ",
-            Mode.AskProc => "Process path: ",
-            _            => CmdPrompt,
-        };
+            case Mode.AskDll:
+                PromptLabel.Text = "DLL path: ";
+                Cmd.Text = _cfg.Dll ?? string.Empty;
+                Cmd.CaretIndex = Cmd.Text.Length;
+                break;
+            case Mode.AskProc:
+                PromptLabel.Text = "Process path: ";
+                Cmd.Text = _cfg.Proc ?? string.Empty;
+                Cmd.CaretIndex = Cmd.Text.Length;
+                break;
+            default:
+                PromptLabel.Text = CmdPrompt;
+                break;
+        }
     }
 
     // ============================ boot ============================
@@ -110,11 +155,6 @@ public partial class MainWindow : Window
     {
         Write("Microsoft Windows [Version 10.0.22631.4460]", _dim);
         Write("(c) Microsoft Corporation. All rights reserved.", _dim);
-        Blank();
-        Write("   com.fsociety // dll injector   v1.0  [x64]", _white);
-        Tag("[+]", _green, "hello, friend.");
-        Write("      to inject:  dll inject   then paste the dll path and the process path.");
-        Write("      type 'help' for all commands, 'list' to see running processes.", _dim);
         Blank();
     }
 
@@ -157,46 +197,47 @@ public partial class MainWindow : Window
                 Tag("[+]", _green, $"{_procs.Count} processes."); Blank();
                 break;
             case "cls": case "clear": _par.Inlines.Clear(); break;
-            case "ver": Write("  fsociety injector  v1.0  [x64]  —  hello, friend."); Blank(); break;
-            case "whoami": Write("  fsociety\\friend"); Blank(); break;
-            case "exit": Write("  bye, friend.", _dim); Close(); break;
+            case "ver":
+                Blank();
+                Write("Microsoft Windows [Version 10.0.22631.4460]");
+                Blank();
+                break;
+            case "exit": Close(); break;
             default:
-                Write($"  '{verb}' is not recognized. type 'help'.", _fg); Blank(); break;
+                Write($"'{verb}' is not recognized as an internal or external command,");
+                Write("operable program or batch file.");
+                Blank();
+                break;
         }
     }
 
     private void Help()
     {
         Blank();
-        Write("  commands", _white);
-        Write("    dll inject           inject a dll (asks for the dll path, then the process path)");
-        Write("    list                 enumerate running processes (with paths)");
-        Write("    refresh              re-scan processes");
-        Write("    cls                  clear the screen");
-        Write("    ver                  version info");
-        Write("    exit                 close");
+        Write("  dll inject           inject a dll (asks for the dll path, then the process path)");
+        Write("  list                 enumerate running processes (with paths)");
+        Write("  refresh              re-scan processes");
+        Write("  cls                  clear the screen");
+        Write("  exit                 close");
         Blank();
     }
 
     // ============================ the inject flow ============================
 
-    /// <summary>`dll inject` (optionally `dll inject &lt;path&gt;`) starts the flow.</summary>
     private void StartInjectFlow(string verb, string arg)
     {
-        // Accept "dll inject", "dll inject <dllpath>", or bare "inject".
         if (verb == "dll")
         {
             var sub = arg.Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries);
             if (sub.Length == 0 || !sub[0].Equals("inject", StringComparison.OrdinalIgnoreCase))
             {
-                Tag("[x]", _red, "usage: dll inject"); Blank(); return;
+                Write("usage: dll inject"); Blank(); return;
             }
             arg = sub.Length > 1 ? sub[1] : string.Empty;
         }
 
         if (!string.IsNullOrWhiteSpace(arg))
         {
-            // A dll path was pasted on the same line — skip straight to the process.
             _pendingDll = arg.Trim().Trim('"');
             AskProcOrFail();
         }
@@ -221,24 +262,32 @@ public partial class MainWindow : Window
             SetMode(Mode.Command);
             return;
         }
+
+        // Remember the DLL for next session, then ask for the process.
+        _cfg.Dll = _pendingDll;
+        SaveCfg();
         SetMode(Mode.AskProc);
     }
 
     private void HandleProcPath(string path)
     {
-        SetMode(Mode.Command);
-
-        if (path.Length == 0) { Tag("[x]", _red, "cancelled."); Blank(); return; }
+        if (path.Length == 0) { Tag("[x]", _red, "cancelled."); Blank(); SetMode(Mode.Command); return; }
 
         var target = ResolveProcess(path);
         if (target is null)
         {
+            SetMode(Mode.Command);
             Tag("[x]", _red, $"process not running: {path}");
             Write("      (run 'list' to see running processes and their paths.)", _dim);
             Blank();
             return;
         }
 
+        // Remember the process path for next session.
+        _cfg.Proc = path;
+        SaveCfg();
+
+        SetMode(Mode.Command);
         InjectInto(target, _pendingDll!);
     }
 

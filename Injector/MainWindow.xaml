@@ -1,7 +1,7 @@
 <Window x:Class="FsocietyInjector.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Administrator: Command Prompt - fsociety.exe"
+        Title="Administrator: Command Prompt"
         Height="600" Width="880"
         MinHeight="360" MinWidth="560"
         WindowStartupLocation="CenterScreen"
@@ -33,7 +33,7 @@
                             <TextBlock Text="&gt;_" FontSize="8" Foreground="#CCCCCC"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
-                        <TextBlock Text="Administrator: Command Prompt - fsociety.exe"
+                        <TextBlock Text="Administrator: Command Prompt"
                                    FontFamily="Segoe UI" FontSize="12"
                                    Foreground="{StaticResource CaptionTextBrush}"
                                    VerticalAlignment="Center" />
@@ -70,7 +70,7 @@
             <!-- ============================ PROMPT INPUT ============================ -->
             <Grid Grid.Row="2" Background="{StaticResource ConsoleBrush}">
                 <StackPanel Orientation="Horizontal" Margin="12,2,12,10" VerticalAlignment="Center">
-                    <TextBlock x:Name="PromptLabel" Text="C:\fsociety&gt;"
+                    <TextBlock x:Name="PromptLabel" Text="C:\Windows\system32&gt;"
                                Foreground="{StaticResource FgBrush}" FontSize="14"
                                VerticalAlignment="Center" />
                     <TextBox x:Name="Cmd"

@@ -22,12 +22,7 @@ bypasses, no obfuscation, no detection evasion.
 Microsoft Windows [Version 10.0.22631.4460]
 (c) Microsoft Corporation. All rights reserved.
 
-   com.fsociety // dll injector   v1.0  [x64]
-  [+] hello, friend.
-      to inject:  dll inject   then paste the dll path and the process path.
-      type 'help' for all commands, 'list' to see running processes.
-
-C:\fsociety>list
+C:\Windows\system32>list
 
    PID     ARCH   PROCESS / PATH
    ------  -----  --------------------------------------------
@@ -35,14 +30,19 @@ C:\fsociety>list
    1104    x64    C:\Windows\explorer.exe
    9012    x86    C:\Windows\SysWOW64\notepad.exe
 
-C:\fsociety>dll inject
-DLL path: C:\fsociety\bin\dely_payload.dll
+C:\Windows\system32>dll inject
+DLL path: C:\payloads\dely_payload.dll
 Process path: C:\Program Files (x86)\Roblox\Versions\...\RobloxPlayerBeta.exe
   [*] injecting dely_payload.dll -> RobloxPlayerBeta.exe (8241)...
   [+] Injected dely_payload.dll into RobloxPlayerBeta (8241).
 
-C:\fsociety>_
+C:\Windows\system32>_
 ```
+
+The DLL path and process path are **remembered between sessions** — the next
+time you run `dll inject`, each prompt is pre-filled with your last choice, so
+you can just press Enter to reuse it. They're stored in
+`%APPDATA%\fsociety\injector.json`.
 
 ## Commands
 
