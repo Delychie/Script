@@ -30,6 +30,9 @@
   *{box-sizing:border-box;margin:0;padding:0}
   [hidden]{display:none!important}
   html,body{height:100%}
+  /* procedural cover art fills + clips its container */
+  .lib-cover,.quick-cover,.card-art,.track-mini,.sr-cover,.np-cover,.now-art,.pl-hero-art{overflow:hidden}
+  .lib-cover>svg,.quick-cover>svg,.card-art>svg,.track-mini>svg,.sr-cover>svg,.np-cover>svg,.now-art>svg,.pl-hero-art>svg{display:block;width:100%;height:100%}
   body{
     font-family:var(--font);
     background:var(--black);
@@ -760,6 +763,75 @@
   };
   const grad = (p,deg=145)=>`linear-gradient(${deg}deg,${p[0]},${p[1]})`;
 
+  // ================= PROCEDURAL COVER ART =================
+  // Real album covers are copyrighted, so every cover here is generated
+  // deterministically from its title — same title always yields the same art.
+  let coverUID = 0;
+  const PALETTES = [
+    ["#1e1b4b","#4f46e5","#a78bfa","#f0abfc"],["#0c4a6e","#0284c7","#38bdf8","#a5f3fc"],
+    ["#7f1d1d","#dc2626","#f59e0b","#fde68a"],["#064e3b","#059669","#34d399","#a7f3d0"],
+    ["#831843","#db2777","#fb7185","#fecdd3"],["#78350f","#d97706","#fbbf24","#fef08a"],
+    ["#1e293b","#475569","#94a3b8","#e2e8f0"],["#3b0764","#7c3aed","#c084fc","#f5d0fe"],
+    ["#0f172a","#1d4ed8","#60a5fa","#bfdbfe"],["#134e4a","#0d9488","#2dd4bf","#99f6e4"],
+    ["#500724","#be123c","#fb7185","#ffe4e6"],["#1c1917","#57534e","#a8a29e","#e7e5e4"],
+    ["#4a044e","#a21caf","#e879f9","#fae8ff"],["#14532d","#16a34a","#4ade80","#dcfce7"],
+    ["#082f49","#0369a1","#7dd3fc","#e0f2fe"],["#450a0a","#b91c1c","#fca5a5","#fee2e2"]
+  ];
+  function rngFrom(str){
+    let h=2166136261>>>0;
+    for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); }
+    return ()=>{ h+=0x6D2B79F5; let t=h; t=Math.imul(t^t>>>15,t|1); t^=t+Math.imul(t^t>>>7,t|61); return ((t^t>>>14)>>>0)/4294967296; };
+  }
+  function initials(name){
+    const w=name.replace(/[^A-Za-z0-9 ]/g,"").split(/\s+/).filter(x=>x && !/^(the|and|of|a)$/i.test(x));
+    return ((w[0]?w[0][0]:(name[0]||"?"))+(w[1]?w[1][0]:"")).toUpperCase();
+  }
+  function likedCover(){
+    return '<svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="lk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3d18b8"/><stop offset="1" stop-color="#c4b0e8"/></linearGradient></defs><rect width="100" height="100" fill="url(#lk)"/><path transform="translate(50 46) scale(2.2)" fill="#fff" d="M0 13C-8 5.5-13 .5-13-4.5c0-3 2.4-5.5 5.5-5.5C-5-10-3-8.5-1.6-6.5L0-4.5l1.6-2C3-8.5 5-10 7.5-10 10.6-10 13-7.5 13-4.5 13 .5 8 5.5 0 13z"/></svg>';
+  }
+  function mkCover(seed, opts){
+    opts=opts||{};
+    const r=rngFrom(seed);
+    const P=PALETTES[Math.floor(r()*PALETTES.length)];
+    const u="c"+(coverUID++);
+    const rnd=(a,b)=>a+(b-a)*r();
+    const ri=(a,b)=>Math.floor(rnd(a,b+1));
+    const pool=opts.round?[0,1,6,7,8,9]:[0,1,2,3,4,5,6,7,8,9];
+    const style=pool[Math.floor(r()*pool.length)];
+    let defs="", b="";
+    defs+=`<linearGradient id="${u}bg" gradientTransform="rotate(${ri(0,360)} .5 .5)"><stop offset="0" stop-color="${P[0]}"/><stop offset="1" stop-color="${P[1]}"/></linearGradient>`;
+    b+=`<rect width="100" height="100" fill="url(#${u}bg)"/>`;
+    if(style===0){
+      b+=`<circle cx="${ri(55,95)}" cy="${ri(8,42)}" r="${ri(28,42)}" fill="${P[2]}" opacity=".9"/><circle cx="${ri(5,45)}" cy="${ri(60,95)}" r="${ri(14,26)}" fill="${P[3]}" opacity=".85"/>`;
+    } else if(style===1){
+      const cx=ri(15,85),cy=ri(15,85); const cols=[P[1],P[2],P[3]];
+      for(let i=6;i>=1;i--) b+=`<circle cx="${cx}" cy="${cy}" r="${i*9}" fill="none" stroke="${cols[i%3]}" stroke-width="3" opacity=".85"/>`;
+    } else if(style===2){
+      const cols=[P[1],P[2],P[3]]; let y=0;
+      while(y<100){ const hh=ri(6,20); b+=`<rect x="0" y="${y}" width="100" height="${hh}" fill="${cols[ri(0,2)]}" opacity="${(0.55+r()*0.45).toFixed(2)}"/>`; y+=hh; }
+    } else if(style===3){
+      b+=`<path d="M0 0 L100 0 L0 100 Z" fill="${P[2]}" opacity=".9"/><circle cx="${ri(58,82)}" cy="${ri(58,82)}" r="${ri(12,22)}" fill="${P[3]}"/>`;
+    } else if(style===4){
+      const cx=ri(0,100), cy=106;
+      for(let a=-90;a<90;a+=15){ const r1=a*Math.PI/180,r2=(a+7)*Math.PI/180; b+=`<path d="M${cx} ${cy} L${cx+Math.cos(r1)*170} ${cy+Math.sin(r1)*170} L${cx+Math.cos(r2)*170} ${cy+Math.sin(r2)*170} Z" fill="${P[2]}" opacity=".5"/>`; }
+    } else if(style===5){
+      for(let gy=10;gy<100;gy+=18) for(let gx=10;gx<100;gx+=18) b+=`<circle cx="${gx}" cy="${gy}" r="${(3+r()*5).toFixed(1)}" fill="${P[ri(2,3)]}" opacity=".9"/>`;
+    } else if(style===6){
+      const cols=[P[1],P[2],P[3]];
+      for(let i=0;i<3;i++){ const base=38+i*20; b+=`<path d="M0 ${base} C 25 ${base-16}, 42 ${base+16}, 62 ${base} S 90 ${base-16}, 100 ${base} L100 100 L0 100 Z" fill="${cols[i]}" opacity=".85"/>`; }
+    } else if(style===7){
+      b+=`<rect width="100" height="100" fill="${P[3]}"/><circle cx="35" cy="35" r="28" fill="${P[1]}"/><path d="M65 65 A35 35 0 0 1 100 100 L65 100 Z" fill="${P[2]}"/><rect x="60" y="5" width="14" height="52" fill="${P[0]}"/>`;
+    } else if(style===8){
+      defs+=`<filter id="${u}b" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="10"/></filter>`;
+      b+=`<g filter="url(#${u}b)"><circle cx="${ri(20,45)}" cy="${ri(18,50)}" r="30" fill="${P[2]}"/><circle cx="${ri(55,85)}" cy="${ri(30,70)}" r="34" fill="${P[3]}" opacity=".8"/><circle cx="${ri(40,70)}" cy="${ri(60,92)}" r="26" fill="${P[1]}"/></g>`;
+    } else {
+      b+=`<text x="50" y="52" text-anchor="middle" dominant-baseline="central" font-family="Montserrat,Arial,sans-serif" font-weight="800" font-size="${opts.round?34:42}" fill="${P[3]}" opacity=".95">${initials(seed)}</text>`;
+    }
+    return `<svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg"><defs>${defs}</defs>${b}</svg>`;
+  }
+  function coverSVG(name, opts){ return name==="Liked Songs" ? likedCover() : mkCover(name, opts); }
+  function coverURI(name, opts){ return `url("data:image/svg+xml,${encodeURIComponent(coverSVG(name,opts))}")`; }
+
   // ---- data ----
   const tracks = [
     {t:"Blinding Lights", a:"The Midnight Echo", d:200, g:G.a, glyph:"B"},
@@ -771,7 +843,17 @@
     {t:"Afterglow", a:"Nova Drift", d:198, g:G.f, glyph:"A"},
     {t:"Velvet Rain", a:"Lantern Club", d:233, g:G.m, glyph:"V"},
     {t:"Cascade", a:"Echo Chamber", d:176, g:G.n, glyph:"C"},
-    {t:"Wildfire", a:"Ember Lake", d:251, g:G.h, glyph:"W"}
+    {t:"Wildfire", a:"Ember Lake", d:251, g:G.h, glyph:"W"},
+    {t:"Midnight Drive", a:"Nova Drift", d:214, g:G.j, glyph:"M"},
+    {t:"Coastline", a:"Coastal Youth", d:229, g:G.b, glyph:"C"},
+    {t:"Echoes", a:"Echo Chamber", d:242, g:G.n, glyph:"E"},
+    {t:"Crimson Sky", a:"Ember Lake", d:196, g:G.h, glyph:"C"},
+    {t:"Lanterns", a:"Lantern Club", d:205, g:G.m, glyph:"L"},
+    {t:"Static Bloom", a:"Violet Static", d:238, g:G.o, glyph:"S"},
+    {t:"Marble", a:"Marble Coast", d:221, g:G.d, glyph:"M"},
+    {t:"Hollow", a:"The Hollows", d:257, g:G.i, glyph:"H"},
+    {t:"Sundown", a:"Sable & Sun", d:188, g:G.e, glyph:"S"},
+    {t:"Aurora", a:"The Midnight Echo", d:263, g:G.a, glyph:"A"}
   ];
 
   const quicks = [
@@ -804,7 +886,11 @@
     {t:"Sable & Sun", d:"Artist", g:G.e, glyph:"S", round:true},
     {t:"Marble Coast", d:"Artist", g:G.d, glyph:"M", round:true},
     {t:"Nova Drift", d:"Artist", g:G.f, glyph:"N", round:true},
-    {t:"Ember Lake", d:"Artist", g:G.h, glyph:"E", round:true}
+    {t:"Ember Lake", d:"Artist", g:G.h, glyph:"E", round:true},
+    {t:"Coastal Youth", d:"Artist", g:G.b, glyph:"C", round:true},
+    {t:"The Hollows", d:"Artist", g:G.i, glyph:"H", round:true},
+    {t:"Lantern Club", d:"Artist", g:G.m, glyph:"L", round:true},
+    {t:"Echo Chamber", d:"Artist", g:G.n, glyph:"E", round:true}
   ];
 
   const mixes = [
@@ -828,7 +914,14 @@
     {n:"Golden Hour", s:"Album • Sable & Sun", g:G.e, glyph:"G"},
     {n:"Discover Weekly", s:"Playlist • Spotify", g:G.i, glyph:"↯"},
     {n:"Throwback Thursday", s:"Playlist • Liam", g:G.e, glyph:"T"},
-    {n:"Ember Lake", s:"Artist", g:G.h, glyph:"E", round:true}
+    {n:"Ember Lake", s:"Artist", g:G.h, glyph:"E", round:true},
+    {n:"After Hours", s:"Album • The Midnight Echo", g:G.a, glyph:"A"},
+    {n:"Tidal", s:"Album • Marble Coast", g:G.d, glyph:"T"},
+    {n:"Orbit", s:"Album • Nova Drift", g:G.j, glyph:"O"},
+    {n:"Hollow Bones", s:"Album • The Hollows", g:G.i, glyph:"H"},
+    {n:"Reverb", s:"Album • Echo Chamber", g:G.n, glyph:"R"},
+    {n:"Saltwater EP", s:"Album • Coastal Youth", g:G.b, glyph:"S"},
+    {n:"On Repeat", s:"Playlist • Spotify", g:G.c, glyph:"↺"}
   ];
 
   const el = s=>document.querySelector(s);
@@ -840,7 +933,7 @@
     const d = document.createElement("div");
     d.className = "lib-item"+(i===0?" active":"");
     d.innerHTML = `
-      <div class="lib-cover${it.round?" round":""}" style="background:${grad(it.g)}">${it.glyph||""}</div>
+      <div class="lib-cover${it.round?" round":""}">${coverSVG(it.n,{round:it.round})}</div>
       <div class="lib-meta">
         <div class="lib-name">${it.n}</div>
         <div class="lib-sub">${it.pin?'<span class="pin">📌</span>':""}${it.s}</div>
@@ -864,7 +957,7 @@
     const b = document.createElement("div");
     b.className="quick";
     b.innerHTML = `
-      <div class="quick-cover" style="background:${grad(q.g)}">${i===0?"♥":""}</div>
+      <div class="quick-cover">${coverSVG(q.n)}</div>
       <div class="quick-name">${q.n}</div>
       <button class="quick-play" title="Play ${q.n}"><svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M3 1.7a.7.7 0 0 1 1.06-.6l10.5 6.3a.7.7 0 0 1 0 1.2L4.06 14.9A.7.7 0 0 1 3 14.3V1.7z"/></svg></button>`;
     b.querySelector(".quick-play").addEventListener("click",e=>{
@@ -882,7 +975,7 @@
       const c = document.createElement("div");
       c.className="card";
       c.innerHTML = `
-        <div class="card-art${it.round?" round":""}" style="background:${grad(it.g)}"><span class="big">${it.glyph||it.t[0]}</span></div>
+        <div class="card-art${it.round?" round":""}">${coverSVG(it.t,{round:it.round})}</div>
         <button class="card-play" title="Play"><svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor"><path d="M3 1.7a.7.7 0 0 1 1.06-.6l10.5 6.3a.7.7 0 0 1 0 1.2L4.06 14.9A.7.7 0 0 1 3 14.3V1.7z"/></svg></button>
         <div class="card-title">${it.t}</div>
         <div class="card-desc">${it.d}</div>`;
@@ -925,15 +1018,13 @@
 
     el("#npTitle").textContent = tr.t;
     el("#npArtist").textContent = tr.a;
-    el("#npCover").textContent = tr.glyph||tr.t[0];
-    el("#npCover").style.background = grad(tr.g);
+    el("#npCover").innerHTML = coverSVG(tr.t);
 
     el("#nowTrack").textContent = tr.t;
     el("#nowArtist").textContent = tr.a;
     el("#nowHeadTitle").textContent = tr.t;
-    el("#nowArtGlyph").textContent = tr.glyph||tr.t[0];
-    el("#nowArt").style.background = grad(tr.g);
-    el("#aboutBanner").style.background = grad(tr.g,120);
+    el("#nowArt").innerHTML = coverSVG(tr.t);
+    el("#aboutBanner").style.background = "linear-gradient(180deg,rgba(0,0,0,.1),rgba(0,0,0,.6)), "+coverURI(tr.a,{round:true})+" center/cover";
 
     // recolor main header gradient to match the track
     el("#main").style.setProperty("--main-top", tr.g[0]);
@@ -1125,9 +1216,8 @@
     const isArtist = meta.kind==="Artist";
     const list = seededTracks(meta.t);
     curPlTracks = list;
-    el("#plHeroArt").style.background = grad(meta.g);
     el("#plHeroArt").classList.toggle("round", !!meta.round);
-    el("#plHeroGlyph").textContent = meta.glyph || meta.t[0];
+    el("#plHeroArt").innerHTML = coverSVG(meta.t,{round:meta.round});
     el("#plKind").textContent = meta.kind || "Playlist";
     el("#plName").textContent = meta.t;
     el("#plOwner").textContent = meta.owner || (isArtist? (Math.floor(Math.random()*9+2)+","+String(Math.floor(Math.random()*900+100))+",412 monthly listeners") : "Liam");
@@ -1157,7 +1247,7 @@
         </div>
         <div class="col-title">
           <div class="track-title-cell">
-            <div class="track-mini" style="background:${grad(tr.g)}">${tr.glyph||tr.t[0]}</div>
+            <div class="track-mini">${coverSVG(tr.t)}</div>
             <div style="min-width:0">
               <div class="tt-name">${tr.t}</div>
               <div class="tt-artist">${tr.a}</div>
@@ -1235,7 +1325,7 @@
       const d = document.createElement("div");
       d.className = "sr-item";
       d.innerHTML = `
-        <div class="sr-cover${it.round?" round":""}" style="background:${grad(it.g)}">${it.glyph||it.name[0]}</div>
+        <div class="sr-cover${it.round?" round":""}">${coverSVG(it.name,{round:it.round})}</div>
         <div style="min-width:0"><div class="sr-name">${it.name}</div><div class="sr-sub">${it.sub}</div></div>
         <span class="sr-play"><svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor"><path d="M3 1.7a.7.7 0 0 1 1.06-.6l10.5 6.3a.7.7 0 0 1 0 1.2L4.06 14.9A.7.7 0 0 1 3 14.3V1.7z"/></svg></span>`;
       d.addEventListener("click",()=>{
