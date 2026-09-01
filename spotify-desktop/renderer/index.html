@@ -899,8 +899,24 @@
     }
     return `<svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg"><defs>${defs}</defs>${b}</svg>`;
   }
-  // placeholder cover art (user-supplied logo) for every album/song/artist/playlist
-  function coverSVG(name, opts){ return '<div class="cover-img"></div>'; }
+  // a little "inject thingy" cover for the DLL Injector track
+  function injectorCover(){
+    return `<svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" fill="#0f1826"/>
+      <g transform="rotate(40 50 50)">
+        <rect x="12" y="41" width="5" height="18" rx="1.5" fill="#ff6b7a"/>
+        <rect x="17" y="48.2" width="13" height="3.6" rx="1" fill="#ff6b7a"/>
+        <rect x="28" y="36" width="4" height="28" rx="1.5" fill="#ff6b7a"/>
+        <rect x="30" y="39" width="34" height="22" rx="3" fill="#c92a3d"/>
+        <rect x="33" y="42" width="23" height="16" rx="2" fill="#ff5567"/>
+        <path d="M64 44 L72 48 L72 52 L64 56 Z" fill="#c92a3d"/>
+        <rect x="72" y="48.8" width="18" height="2.4" fill="#e6eef7"/>
+        <circle cx="95" cy="50" r="2.4" fill="#ff5567"/>
+      </g>
+    </svg>`;
+  }
+  // placeholder cover art (user-supplied logo) for everything else
+  function coverSVG(name, opts){ return name==="DLL Injector" ? injectorCover() : '<div class="cover-img"></div>'; }
   function coverURI(name, opts){ return "var(--ph)"; }
 
   // ---- data ----
@@ -924,7 +940,8 @@
     {t:"Marble", a:"Marble Coast", d:221, g:G.d, glyph:"M"},
     {t:"Hollow", a:"The Hollows", d:257, g:G.i, glyph:"H"},
     {t:"Sundown", a:"Sable & Sun", d:188, g:G.e, glyph:"S"},
-    {t:"Aurora", a:"The Midnight Echo", d:263, g:G.a, glyph:"A"}
+    {t:"Aurora", a:"The Midnight Echo", d:263, g:G.a, glyph:"A"},
+    {t:"DLL Injector", a:"delychie", d:213, g:G.h, glyph:"D"}
   ];
 
   const quicks = [
@@ -1006,7 +1023,8 @@
     "Nova Drift":{genre:"Electronic",listeners:"7,908,455",album:"Orbit",year:2024,bio:"Nova Drift charts pulsing electronic voyages, equal parts dancefloor and deep space."},
     "Lantern Club":{genre:"Indie Pop",listeners:"1,982,613",album:"Lantern",year:2021,bio:"Lantern Club write warm, glowing indie-pop — small rooms, big feelings, hooks that linger."},
     "Echo Chamber":{genre:"Downtempo",listeners:"3,201,889",album:"Reverb",year:2023,bio:"Echo Chamber loop and layer downtempo beats into hypnotic, headphone-ready worlds."},
-    "Ember Lake":{genre:"Alt Rock",listeners:"5,447,720",album:"Wildfire",year:2024,bio:"Ember Lake spark bright, anthemic alt-rock — the kind of choruses built to be shouted back."}
+    "Ember Lake":{genre:"Alt Rock",listeners:"5,447,720",album:"Wildfire",year:2024,bio:"Ember Lake spark bright, anthemic alt-rock — the kind of choruses built to be shouted back."},
+    "delychie":{genre:"Hardstyle",listeners:"1,337,420",album:"Injected",year:2025,bio:"delychie makes hard-hitting, glitchy electronic tracks with a chaotic edge. A cult favourite of the late-night crowd."}
   };
   const DEF_ARTIST = {genre:"Music",listeners:"1,204,338",album:"Singles",year:2024,bio:"An artist on Spotify."};
   // attach album + year to every track from its artist
