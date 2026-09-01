@@ -29,14 +29,16 @@ public static class ProcessService
                 var is64 = TryIs64Bit(proc, out var known);
                 var arch = !known ? "—" : is64 ? "x64" : "x86";
 
-                string title;
-                try { title = proc.MainWindowTitle ?? string.Empty; }
-                catch { title = string.Empty; }
+                // Full exe path — reading a module list can throw (protected
+                // process, or a 32-bit target seen from x64); leave it blank then.
+                string path;
+                try { path = proc.MainModule?.FileName ?? string.Empty; }
+                catch { path = string.Empty; }
 
                 results.Add(new ProcessModel(
                     Id: proc.Id,
                     Name: SafeName(proc),
-                    Title: title,
+                    Path: path,
                     Is64Bit: is64,
                     ArchLabel: arch));
             }

@@ -20,29 +20,30 @@
                 <RowDefinition Height="Auto" />   <!-- prompt input -->
             </Grid.RowDefinitions>
 
-            <!-- ============================ TITLE BAR ============================ -->
-            <Border x:Name="TitleBar" Grid.Row="0" Height="32"
-                    Background="{StaticResource TitleBarBrush}"
-                    BorderBrush="#2B2B2B" BorderThickness="0,0,0,1"
+            <!-- ============================ TITLE BAR (Win10 light) ============================ -->
+            <Border x:Name="TitleBar" Grid.Row="0" Height="30"
+                    Background="{StaticResource CaptionBarBrush}"
+                    BorderBrush="#D9D9D9" BorderThickness="0,0,0,1"
                     MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
                 <Grid>
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="9,0,0,0">
                         <!-- tiny console icon -->
-                        <Border Width="15" Height="15" CornerRadius="2" Margin="0,0,8,0"
-                                Background="#2A2A2A" BorderBrush="#444" BorderThickness="1">
-                            <TextBlock Text="&gt;_" FontSize="8" Foreground="#BBBBBB"
+                        <Border Width="14" Height="14" Margin="0,0,8,0"
+                                Background="#0C0C0C" BorderBrush="#7A7A7A" BorderThickness="1">
+                            <TextBlock Text="&gt;_" FontSize="8" Foreground="#CCCCCC"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
-                        <TextBlock Text="Administrator: Command Prompt — fsociety.exe"
-                                   FontFamily="Segoe UI" FontSize="12" Foreground="#CFCFCF"
+                        <TextBlock Text="Administrator: Command Prompt - fsociety.exe"
+                                   FontFamily="Segoe UI" FontSize="12"
+                                   Foreground="{StaticResource CaptionTextBrush}"
                                    VerticalAlignment="Center" />
                     </StackPanel>
 
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
                         <Button x:Name="BtnMin" Style="{StaticResource CaptionButton}"
                                 Content="&#x2013;" Click="BtnMin_Click" />
                         <Button x:Name="BtnMax" Style="{StaticResource CaptionButton}"
-                                Content="&#x25A1;" Click="BtnMax_Click" />
+                                Content="&#x2610;" Click="BtnMax_Click" />
                         <Button x:Name="BtnClose" Style="{StaticResource CloseCaptionButton}"
                                 Content="&#x2715;" Click="BtnClose_Click" />
                     </StackPanel>

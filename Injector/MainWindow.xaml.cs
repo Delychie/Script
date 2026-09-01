@@ -3,29 +3,33 @@ using System.Windows;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
-using Microsoft.Win32;
 using FsocietyInjector.Models;
 using FsocietyInjector.Services;
 
 namespace FsocietyInjector;
 
 /// <summary>
-/// A Command Prompt-style front end for the injector. Everything is driven by
-/// typed commands (help, list, select, dll, inject…) printed into a console
-/// view, so it reads like a real cmd.exe session rather than a GUI.
+/// A Command Prompt front end for the injector. Everything is typed into a
+/// console view. The one way to inject is:
+///
+///     C:\fsociety>dll inject
+///     DLL path: &lt;paste the .dll path&gt;
+///     Process path: &lt;paste the target's .exe path&gt;
+///
+/// which resolves the running process from that exe path and injects.
 /// </summary>
 public partial class MainWindow : Window
 {
-    private const string Prompt = "C:\\fsociety>";
+    private const string CmdPrompt = "C:\\fsociety>";
+
+    private enum Mode { Command, AskDll, AskProc }
 
     private List<ProcessModel> _procs = new();
-    private ProcessModel? _target;
-    private string? _dll;
+    private Mode _mode = Mode.Command;
+    private string? _pendingDll;
     private bool _busy;
 
     private Paragraph _par = null!;
-
-    // Console palette, pulled once from the theme.
     private Brush _fg = null!, _dim = null!, _white = null!, _green = null!, _red = null!, _yellow = null!;
 
     public MainWindow()
@@ -81,11 +85,23 @@ public partial class MainWindow : Window
         Out.ScrollToEnd();
     }
 
-    private void Echo(string cmd)
+    /// <summary>Prints the current prompt followed by what the user typed.</summary>
+    private void Echo(string typed)
     {
-        _par.Inlines.Add(new Run(Prompt) { Foreground = _fg });
-        _par.Inlines.Add(new Run(cmd) { Foreground = _fg });
+        _par.Inlines.Add(new Run(PromptLabel.Text) { Foreground = _fg });
+        _par.Inlines.Add(new Run(typed) { Foreground = _fg });
         _par.Inlines.Add(new LineBreak());
+    }
+
+    private void SetMode(Mode mode)
+    {
+        _mode = mode;
+        PromptLabel.Text = mode switch
+        {
+            Mode.AskDll  => "DLL path: ",
+            Mode.AskProc => "Process path: ",
+            _            => CmdPrompt,
+        };
     }
 
     // ============================ boot ============================
@@ -96,10 +112,10 @@ public partial class MainWindow : Window
         Write("(c) Microsoft Corporation. All rights reserved.", _dim);
         Blank();
         Write("   com.fsociety // dll injector   v1.0  [x64]", _white);
-        Tag("[+]", _green, "hello, friend.  type 'help' for commands.");
+        Tag("[+]", _green, "hello, friend.");
+        Write("      to inject:  dll inject   then paste the dll path and the process path.");
+        Write("      type 'help' for all commands, 'list' to see running processes.", _dim);
         Blank();
-        RefreshProcs();
-        PrintList();
     }
 
     // ============================ command loop ============================
@@ -108,15 +124,21 @@ public partial class MainWindow : Window
     {
         if (e.Key != Key.Return || _busy) return;
         e.Handled = true;
-        var line = Cmd.Text;
+
+        var text = Cmd.Text;
         Cmd.Clear();
-        Execute(line);
+        Echo(text);
+
+        switch (_mode)
+        {
+            case Mode.AskDll:  HandleDllPath(text.Trim().Trim('"')); break;
+            case Mode.AskProc: HandleProcPath(text.Trim().Trim('"')); break;
+            default:           Execute(text.Trim()); break;
+        }
     }
 
-    private void Execute(string raw)
+    private void Execute(string cmd)
     {
-        var cmd = raw.Trim();
-        Echo(cmd);
         if (cmd.Length == 0) return;
 
         var parts = cmd.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
@@ -125,16 +147,15 @@ public partial class MainWindow : Window
 
         switch (verb)
         {
+            case "dll": case "inject":
+                StartInjectFlow(verb, arg);
+                break;
             case "help": case "?": Help(); break;
             case "list": case "ls": case "ps": RefreshProcs(); PrintList(); break;
             case "refresh":
                 RefreshProcs();
                 Tag("[+]", _green, $"{_procs.Count} processes."); Blank();
                 break;
-            case "select": case "sel": Select(arg); break;
-            case "dll": case "payload": SetDll(arg); break;
-            case "browse": Browse(); break;
-            case "inject": Inject(); break;
             case "cls": case "clear": _par.Inlines.Clear(); break;
             case "ver": Write("  fsociety injector  v1.0  [x64]  —  hello, friend."); Blank(); break;
             case "whoami": Write("  fsociety\\friend"); Blank(); break;
@@ -148,11 +169,8 @@ public partial class MainWindow : Window
     {
         Blank();
         Write("  commands", _white);
-        Write("    list                 enumerate running processes");
-        Write("    select <# | pid>     choose a target process");
-        Write("    dll <path>           set the payload dll");
-        Write("    browse               pick a payload with a file dialog");
-        Write("    inject               inject the payload into the target");
+        Write("    dll inject           inject a dll (asks for the dll path, then the process path)");
+        Write("    list                 enumerate running processes (with paths)");
         Write("    refresh              re-scan processes");
         Write("    cls                  clear the screen");
         Write("    ver                  version info");
@@ -160,100 +178,105 @@ public partial class MainWindow : Window
         Blank();
     }
 
-    // ============================ commands ============================
+    // ============================ the inject flow ============================
 
-    private void RefreshProcs() => _procs = ProcessService.Enumerate().ToList();
-
-    private void PrintList()
+    /// <summary>`dll inject` (optionally `dll inject &lt;path&gt;`) starts the flow.</summary>
+    private void StartInjectFlow(string verb, string arg)
     {
-        Blank();
-        Write("   #   PID     ARCH   PROCESS", _dim);
-        Write("   --  ------  -----  ------------------------------", _dim);
-        for (var i = 0; i < _procs.Count; i++)
+        // Accept "dll inject", "dll inject <dllpath>", or bare "inject".
+        if (verb == "dll")
         {
-            var p = _procs[i];
-            var sel = _target is not null && _target.Id == p.Id ? "*" : " ";
-            var num = (i + 1).ToString().PadRight(3);
-            var pid = p.Id.ToString().PadRight(6);
-            var arch = p.ArchLabel.PadRight(4);
-            var archBrush = p.ArchLabel == "x86" ? _yellow : _green;
-
-            _par.Inlines.Add(new Run($"   {num}{sel} {pid}  ") { Foreground = _fg });
-            _par.Inlines.Add(new Run(arch) { Foreground = archBrush });
-            _par.Inlines.Add(new Run($"   {p.Name}") { Foreground = _fg });
-            _par.Inlines.Add(new LineBreak());
+            var sub = arg.Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries);
+            if (sub.Length == 0 || !sub[0].Equals("inject", StringComparison.OrdinalIgnoreCase))
+            {
+                Tag("[x]", _red, "usage: dll inject"); Blank(); return;
+            }
+            arg = sub.Length > 1 ? sub[1] : string.Empty;
         }
-        Blank();
-        Out.ScrollToEnd();
+
+        if (!string.IsNullOrWhiteSpace(arg))
+        {
+            // A dll path was pasted on the same line — skip straight to the process.
+            _pendingDll = arg.Trim().Trim('"');
+            AskProcOrFail();
+        }
+        else
+        {
+            SetMode(Mode.AskDll);
+        }
     }
 
-    private void Select(string arg)
+    private void HandleDllPath(string path)
     {
-        if (string.IsNullOrWhiteSpace(arg))
-        {
-            Tag("[x]", _red, "usage: select <# | pid>"); Blank(); return;
-        }
-
-        ProcessModel? p = null;
-        if (int.TryParse(arg, out var n))
-        {
-            if (n >= 1 && n <= _procs.Count) p = _procs[n - 1];
-            else p = _procs.FirstOrDefault(x => x.Id == n); // treat as a PID
-        }
-
-        if (p is null)
-        {
-            Tag("[x]", _red, $"no such process: {arg}"); Blank(); return;
-        }
-
-        _target = p;
-        Tag("[+]", _green, $"target set: {p.Name} ({p.Id}) [{p.ArchLabel}]");
-        if (p.ArchLabel == "x86")
-            Tag("[!]", _yellow, "target is 32-bit; this injector is x64 and can only load into x64.");
-        Blank();
+        if (path.Length == 0) { Tag("[x]", _red, "cancelled."); Blank(); SetMode(Mode.Command); return; }
+        _pendingDll = path;
+        AskProcOrFail();
     }
 
-    private void SetDll(string arg)
+    private void AskProcOrFail()
     {
-        if (string.IsNullOrWhiteSpace(arg))
+        if (!File.Exists(_pendingDll))
         {
-            Tag("[x]", _red, "usage: dll <path>"); Blank(); return;
+            Tag("[x]", _red, $"dll not found: {_pendingDll}"); Blank();
+            SetMode(Mode.Command);
+            return;
         }
-        _dll = arg.Trim('"');
-        Tag("[+]", _green, $"payload set: {Path.GetFileName(_dll)}");
-        if (!File.Exists(_dll))
-            Tag("[!]", _yellow, "that path does not exist yet.");
-        Blank();
+        SetMode(Mode.AskProc);
     }
 
-    private void Browse()
+    private void HandleProcPath(string path)
     {
-        var dlg = new OpenFileDialog
+        SetMode(Mode.Command);
+
+        if (path.Length == 0) { Tag("[x]", _red, "cancelled."); Blank(); return; }
+
+        var target = ResolveProcess(path);
+        if (target is null)
         {
-            Title = "Select a DLL to inject",
-            Filter = "Dynamic link libraries (*.dll)|*.dll|All files (*.*)|*.*",
-            CheckFileExists = true,
-        };
-        if (dlg.ShowDialog(this) == true)
-        {
-            _dll = dlg.FileName;
-            Tag("[+]", _green, $"payload set: {Path.GetFileName(_dll)}");
+            Tag("[x]", _red, $"process not running: {path}");
+            Write("      (run 'list' to see running processes and their paths.)", _dim);
             Blank();
+            return;
         }
+
+        InjectInto(target, _pendingDll!);
     }
 
-    private async void Inject()
+    /// <summary>
+    /// Matches a running process from a pasted exe path — by full path first,
+    /// then by file name, then by the raw string as a process name.
+    /// </summary>
+    private ProcessModel? ResolveProcess(string path)
     {
-        if (_target is null) { Tag("[x]", _red, "no target. use: select <#>"); Blank(); return; }
-        if (string.IsNullOrEmpty(_dll)) { Tag("[x]", _red, "no payload. use: dll <path> or browse"); Blank(); return; }
+        RefreshProcs();
+        var file = System.IO.Path.GetFileName(path);
+
+        return _procs.FirstOrDefault(p =>
+                   !string.IsNullOrEmpty(p.Path) &&
+                   string.Equals(p.Path, path, StringComparison.OrdinalIgnoreCase))
+            ?? _procs.FirstOrDefault(p =>
+                   file.Length > 0 &&
+                   string.Equals(p.Name, file, StringComparison.OrdinalIgnoreCase))
+            ?? _procs.FirstOrDefault(p =>
+                   string.Equals(p.Name, path, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async void InjectInto(ProcessModel target, string dll)
+    {
+        if (target.ArchLabel == "x86")
+        {
+            Tag("[x]", _red, $"{target.Name} is 32-bit; this injector is x64 and can only load into x64.");
+            Blank();
+            return;
+        }
 
         _busy = true;
         Cmd.IsEnabled = false;
 
-        var f = Path.GetFileName(_dll);
-        Write($"  [*] injecting {f} -> {_target.Name} ({_target.Id})...", _dim);
+        var f = System.IO.Path.GetFileName(dll);
+        Write($"  [*] injecting {f} -> {target.Name} ({target.Id})...", _dim);
 
-        var result = await InjectionService.InjectAsync(_target.Id, _dll);
+        var result = await InjectionService.InjectAsync(target.Id, dll);
 
         if (result.Success) Tag("[+]", _green, result.Message);
         else                Tag("[x]", _red, result.Message);
@@ -262,5 +285,29 @@ public partial class MainWindow : Window
         _busy = false;
         Cmd.IsEnabled = true;
         Cmd.Focus();
+    }
+
+    // ============================ process list ============================
+
+    private void RefreshProcs() => _procs = ProcessService.Enumerate().ToList();
+
+    private void PrintList()
+    {
+        Blank();
+        Write("   PID     ARCH   PROCESS / PATH", _dim);
+        Write("   ------  -----  --------------------------------------------", _dim);
+        foreach (var p in _procs)
+        {
+            var pid = p.Id.ToString().PadRight(6);
+            var arch = p.ArchLabel.PadRight(4);
+            var archBrush = p.ArchLabel == "x86" ? _yellow : _green;
+
+            _par.Inlines.Add(new Run($"   {pid}  ") { Foreground = _fg });
+            _par.Inlines.Add(new Run(arch) { Foreground = archBrush });
+            _par.Inlines.Add(new Run($"   {(string.IsNullOrEmpty(p.Path) ? p.Name : p.Path)}") { Foreground = _fg });
+            _par.Inlines.Add(new LineBreak());
+        }
+        Blank();
+        Out.ScrollToEnd();
     }
 }

@@ -8,7 +8,8 @@
          ================================================================ -->
 
     <Color x:Key="Console">#0C0C0C</Color> <!-- console background        -->
-    <Color x:Key="TitleBar">#1F1F1F</Color><!-- window title bar          -->
+    <Color x:Key="CaptionBar">#F3F3F3</Color> <!-- Win10 light title bar  -->
+    <Color x:Key="CaptionText">#1A1A1A</Color><!-- title bar text          -->
     <Color x:Key="Stroke">#333333</Color>  <!-- window border / scrollbar -->
     <Color x:Key="Fg">#CCCCCC</Color>      <!-- default foreground        -->
     <Color x:Key="Fg1">#9A9A9A</Color>     <!-- secondary                 -->
@@ -18,8 +19,9 @@
     <Color x:Key="Red">#E74856</Color>     <!-- error [x]                 -->
     <Color x:Key="Yellow">#C19C00</Color>  <!-- warning [!]               -->
 
-    <SolidColorBrush x:Key="ConsoleBrush"  Color="{StaticResource Console}" />
-    <SolidColorBrush x:Key="TitleBarBrush" Color="{StaticResource TitleBar}" />
+    <SolidColorBrush x:Key="ConsoleBrush"     Color="{StaticResource Console}" />
+    <SolidColorBrush x:Key="CaptionBarBrush"  Color="{StaticResource CaptionBar}" />
+    <SolidColorBrush x:Key="CaptionTextBrush" Color="{StaticResource CaptionText}" />
     <SolidColorBrush x:Key="StrokeBrush"   Color="{StaticResource Stroke}" />
     <SolidColorBrush x:Key="FgBrush"       Color="{StaticResource Fg}" />
     <SolidColorBrush x:Key="Fg1Brush"      Color="{StaticResource Fg1}" />
