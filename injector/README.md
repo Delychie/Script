@@ -11,11 +11,29 @@ debugging, instrumentation, and learning how Windows process/memory APIs work.
 
 ## Files
 
-| File             | Purpose                                                    |
-| ---------------- | ---------------------------------------------------------- |
-| `injector.cpp`   | The injector. Takes a target and a DLL path.               |
-| `sample_dll.cpp` | A test payload DLL that pops a message box when loaded.    |
-| `build.bat`      | Builds both with MSVC or MinGW, whichever is on PATH.      |
+| File             | Purpose                                                        |
+| ---------------- | ------------------------------------------------------------- |
+| `gui.cpp`        | **Dark-themed GUI injector** — browse a DLL, pick a process.  |
+| `injector.cpp`   | Command-line injector. Takes a target and a DLL path.         |
+| `sample_dll.cpp` | A test payload DLL that pops a message box when loaded.        |
+| `app.manifest`   | Enables modern controls + DPI awareness for the GUI.          |
+| `resource.rc`    | Embeds the manifest into the GUI executable.                  |
+| `build.bat`      | Builds everything with MSVC or MinGW, whichever is on PATH.    |
+
+## GUI
+
+The GUI (`injector-gui.exe`) is the easy way to use this:
+
+1. Click **Browse** and pick your `.dll`.
+2. Find the target in the process list — type in the filter box to search by
+   name or PID, click **Refresh** to re-scan.
+3. Select the process and click **Inject DLL** (or double-click the row, or
+   press Enter).
+
+The status line at the bottom reports success or the exact error.
+
+Dark theme, rounded flat buttons with hover, a searchable/refreshable process
+list, and a file picker filtered to `*.dll`.
 
 ## How it works
 
@@ -41,6 +59,8 @@ build.bat
 Or manually:
 
 ```bat
+rc /fo resource.res resource.rc
+cl /EHsc /O2 gui.cpp resource.res /Fe:injector-gui.exe /link /SUBSYSTEM:WINDOWS
 cl /EHsc /W4 injector.cpp
 cl /LD /EHsc sample_dll.cpp /Fe:sample.dll
 ```
@@ -48,6 +68,8 @@ cl /LD /EHsc sample_dll.cpp /Fe:sample.dll
 **With MinGW-w64:**
 
 ```sh
+windres resource.rc -O coff -o resource.res
+g++ -std=c++17 -municode -O2 gui.cpp resource.res -o injector-gui.exe -mwindows -lcomctl32 -lcomdlg32 -lgdi32 -luxtheme
 g++ -std=c++17 -municode -O2 injector.cpp -o injector.exe
 g++ -shared -O2 sample_dll.cpp -o sample.dll
 ```
