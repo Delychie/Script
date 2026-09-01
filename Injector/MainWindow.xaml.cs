@@ -1,6 +1,6 @@
-using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.Win32;
@@ -9,108 +9,224 @@ using FsocietyInjector.Services;
 
 namespace FsocietyInjector;
 
+/// <summary>
+/// A Command Prompt-style front end for the injector. Everything is driven by
+/// typed commands (help, list, select, dll, inject…) printed into a console
+/// view, so it reads like a real cmd.exe session rather than a GUI.
+/// </summary>
 public partial class MainWindow : Window
 {
-    private readonly ObservableCollection<ProcessModel> _visible = new();
-    private readonly ObservableCollection<LogEntry> _log = new();
-    private List<ProcessModel> _all = new();
+    private const string Prompt = "C:\\fsociety>";
 
-    private ProcessModel? _selected;
-    private string? _dllPath;
+    private List<ProcessModel> _procs = new();
+    private ProcessModel? _target;
+    private string? _dll;
+    private bool _busy;
 
-    // Brushes pulled once from the merged theme so the log stays on-palette.
-    private readonly Brush _mint;
-    private readonly Brush _pink;
-    private readonly Brush _red;
-    private readonly Brush _muted;
+    private Paragraph _par = null!;
+
+    // Console palette, pulled once from the theme.
+    private Brush _fg = null!, _dim = null!, _white = null!, _green = null!, _red = null!, _yellow = null!;
 
     public MainWindow()
     {
         InitializeComponent();
 
-        _mint  = (Brush)FindResource("AccentCBrush");
-        _pink  = (Brush)FindResource("AccentBBrush");
-        _red   = (Brush)FindResource("DangerBrush");
-        _muted = (Brush)FindResource("Text1Brush");
+        _fg     = (Brush)FindResource("FgBrush");
+        _dim    = (Brush)FindResource("DimBrush");
+        _white  = (Brush)FindResource("WhiteBrush");
+        _green  = (Brush)FindResource("GreenBrush");
+        _red    = (Brush)FindResource("RedBrush");
+        _yellow = (Brush)FindResource("YellowBrush");
 
-        ProcListBox.ItemsSource = _visible;
-        LogList.ItemsSource = _log;
+        _par = new Paragraph { Margin = new Thickness(0) };
+        Doc.Blocks.Clear();
+        Doc.Blocks.Add(_par);
 
-        Loaded += (_, _) =>
-        {
-            RefreshProcesses();
-            Log("hello, friend. select a target and a payload to begin.", _mint);
-        };
+        Loaded += (_, _) => { Boot(); Cmd.Focus(); };
     }
 
     // ============================ window chrome ============================
 
     private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ButtonState == MouseButtonState.Pressed)
-            DragMove();
+        if (e.ClickCount == 2) { ToggleMax(); return; }
+        if (e.ButtonState == MouseButtonState.Pressed) DragMove();
     }
 
     private void BtnMin_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+    private void BtnMax_Click(object sender, RoutedEventArgs e) => ToggleMax();
     private void BtnClose_Click(object sender, RoutedEventArgs e) => Close();
 
-    // ============================ process list ============================
+    private void ToggleMax() =>
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
 
-    private void BtnRefresh_Click(object sender, RoutedEventArgs e) => RefreshProcesses();
+    // ============================ console output ============================
 
-    private void RefreshProcesses()
+    private void Write(string text, Brush? brush = null)
     {
-        var keepId = _selected?.Id;
+        _par.Inlines.Add(new Run(text) { Foreground = brush ?? _fg });
+        _par.Inlines.Add(new LineBreak());
+        Out.ScrollToEnd();
+    }
 
-        _all = ProcessService.Enumerate().ToList();
-        ApplyFilter(SearchBox.Text);
+    private void Blank() => Write(string.Empty);
 
-        ProcCount.Text = $"{_all.Count} running";
+    /// <summary>A line whose leading tag (e.g. "[+]") is colored, rest default.</summary>
+    private void Tag(string tag, Brush tagBrush, string rest)
+    {
+        _par.Inlines.Add(new Run("  " + tag + " ") { Foreground = tagBrush });
+        _par.Inlines.Add(new Run(rest) { Foreground = _fg });
+        _par.Inlines.Add(new LineBreak());
+        Out.ScrollToEnd();
+    }
 
-        // Re-select the previous target if it's still around.
-        if (keepId is int id)
+    private void Echo(string cmd)
+    {
+        _par.Inlines.Add(new Run(Prompt) { Foreground = _fg });
+        _par.Inlines.Add(new Run(cmd) { Foreground = _fg });
+        _par.Inlines.Add(new LineBreak());
+    }
+
+    // ============================ boot ============================
+
+    private void Boot()
+    {
+        Write("Microsoft Windows [Version 10.0.22631.4460]", _dim);
+        Write("(c) Microsoft Corporation. All rights reserved.", _dim);
+        Blank();
+        Write("   com.fsociety // dll injector   v1.0  [x64]", _white);
+        Tag("[+]", _green, "hello, friend.  type 'help' for commands.");
+        Blank();
+        RefreshProcs();
+        PrintList();
+    }
+
+    // ============================ command loop ============================
+
+    private void Cmd_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Return || _busy) return;
+        e.Handled = true;
+        var line = Cmd.Text;
+        Cmd.Clear();
+        Execute(line);
+    }
+
+    private void Execute(string raw)
+    {
+        var cmd = raw.Trim();
+        Echo(cmd);
+        if (cmd.Length == 0) return;
+
+        var parts = cmd.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        var verb = parts[0].ToLowerInvariant();
+        var arg = parts.Length > 1 ? string.Join(' ', parts[1..]) : string.Empty;
+
+        switch (verb)
         {
-            var again = _visible.FirstOrDefault(p => p.Id == id);
-            if (again is not null) ProcListBox.SelectedItem = again;
+            case "help": case "?": Help(); break;
+            case "list": case "ls": case "ps": RefreshProcs(); PrintList(); break;
+            case "refresh":
+                RefreshProcs();
+                Tag("[+]", _green, $"{_procs.Count} processes."); Blank();
+                break;
+            case "select": case "sel": Select(arg); break;
+            case "dll": case "payload": SetDll(arg); break;
+            case "browse": Browse(); break;
+            case "inject": Inject(); break;
+            case "cls": case "clear": _par.Inlines.Clear(); break;
+            case "ver": Write("  fsociety injector  v1.0  [x64]  —  hello, friend."); Blank(); break;
+            case "whoami": Write("  fsociety\\friend"); Blank(); break;
+            case "exit": Write("  bye, friend.", _dim); Close(); break;
+            default:
+                Write($"  '{verb}' is not recognized. type 'help'.", _fg); Blank(); break;
         }
     }
 
-    private void SearchBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+    private void Help()
     {
-        SearchHint.Visibility = string.IsNullOrEmpty(SearchBox.Text)
-            ? Visibility.Visible : Visibility.Collapsed;
-        ApplyFilter(SearchBox.Text);
+        Blank();
+        Write("  commands", _white);
+        Write("    list                 enumerate running processes");
+        Write("    select <# | pid>     choose a target process");
+        Write("    dll <path>           set the payload dll");
+        Write("    browse               pick a payload with a file dialog");
+        Write("    inject               inject the payload into the target");
+        Write("    refresh              re-scan processes");
+        Write("    cls                  clear the screen");
+        Write("    ver                  version info");
+        Write("    exit                 close");
+        Blank();
     }
 
-    private void ApplyFilter(string query)
-    {
-        _visible.Clear();
-        var q = query?.Trim() ?? string.Empty;
+    // ============================ commands ============================
 
-        foreach (var p in _all)
+    private void RefreshProcs() => _procs = ProcessService.Enumerate().ToList();
+
+    private void PrintList()
+    {
+        Blank();
+        Write("   #   PID     ARCH   PROCESS", _dim);
+        Write("   --  ------  -----  ------------------------------", _dim);
+        for (var i = 0; i < _procs.Count; i++)
         {
-            if (q.Length == 0
-                || p.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
-                || p.Id.ToString().Contains(q))
-            {
-                _visible.Add(p);
-            }
+            var p = _procs[i];
+            var sel = _target is not null && _target.Id == p.Id ? "*" : " ";
+            var num = (i + 1).ToString().PadRight(3);
+            var pid = p.Id.ToString().PadRight(6);
+            var arch = p.ArchLabel.PadRight(4);
+            var archBrush = p.ArchLabel == "x86" ? _yellow : _green;
+
+            _par.Inlines.Add(new Run($"   {num}{sel} {pid}  ") { Foreground = _fg });
+            _par.Inlines.Add(new Run(arch) { Foreground = archBrush });
+            _par.Inlines.Add(new Run($"   {p.Name}") { Foreground = _fg });
+            _par.Inlines.Add(new LineBreak());
         }
+        Blank();
+        Out.ScrollToEnd();
     }
 
-    private void ProcListBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    private void Select(string arg)
     {
-        _selected = ProcListBox.SelectedItem as ProcessModel;
-        UpdateReadiness();
-        UpdateArchWarning();
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            Tag("[x]", _red, "usage: select <# | pid>"); Blank(); return;
+        }
 
-        if (_selected is not null)
-            SetStatus($"target · {_selected.Name} ({_selected.Id})", _pink);
+        ProcessModel? p = null;
+        if (int.TryParse(arg, out var n))
+        {
+            if (n >= 1 && n <= _procs.Count) p = _procs[n - 1];
+            else p = _procs.FirstOrDefault(x => x.Id == n); // treat as a PID
+        }
+
+        if (p is null)
+        {
+            Tag("[x]", _red, $"no such process: {arg}"); Blank(); return;
+        }
+
+        _target = p;
+        Tag("[+]", _green, $"target set: {p.Name} ({p.Id}) [{p.ArchLabel}]");
+        if (p.ArchLabel == "x86")
+            Tag("[!]", _yellow, "target is 32-bit; this injector is x64 and can only load into x64.");
+        Blank();
     }
 
-    // ============================ payload ============================
+    private void SetDll(string arg)
+    {
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            Tag("[x]", _red, "usage: dll <path>"); Blank(); return;
+        }
+        _dll = arg.Trim('"');
+        Tag("[+]", _green, $"payload set: {Path.GetFileName(_dll)}");
+        if (!File.Exists(_dll))
+            Tag("[!]", _yellow, "that path does not exist yet.");
+        Blank();
+    }
 
-    private void BtnBrowse_Click(object sender, RoutedEventArgs e)
+    private void Browse()
     {
         var dlg = new OpenFileDialog
         {
@@ -118,92 +234,33 @@ public partial class MainWindow : Window
             Filter = "Dynamic link libraries (*.dll)|*.dll|All files (*.*)|*.*",
             CheckFileExists = true,
         };
-
         if (dlg.ShowDialog(this) == true)
         {
-            _dllPath = dlg.FileName;
-            DllPathBox.Text = _dllPath;
-            Log($"payload set · {Path.GetFileName(_dllPath)}", _muted);
-            UpdateReadiness();
-            UpdateArchWarning();
+            _dll = dlg.FileName;
+            Tag("[+]", _green, $"payload set: {Path.GetFileName(_dll)}");
+            Blank();
         }
     }
 
-    // ============================ inject ============================
-
-    private async void BtnInject_Click(object sender, RoutedEventArgs e)
+    private async void Inject()
     {
-        if (_selected is null || string.IsNullOrEmpty(_dllPath))
-            return;
+        if (_target is null) { Tag("[x]", _red, "no target. use: select <#>"); Blank(); return; }
+        if (string.IsNullOrEmpty(_dll)) { Tag("[x]", _red, "no payload. use: dll <path> or browse"); Blank(); return; }
 
-        SetBusy(true);
-        SetStatus("injecting…", _pink);
-        Log($"injecting {Path.GetFileName(_dllPath)} → {_selected.Name} ({_selected.Id})…", _muted);
+        _busy = true;
+        Cmd.IsEnabled = false;
 
-        var result = await InjectionService.InjectAsync(_selected.Id, _dllPath);
+        var f = Path.GetFileName(_dll);
+        Write($"  [*] injecting {f} -> {_target.Name} ({_target.Id})...", _dim);
 
-        if (result.Success)
-        {
-            Log("✓ " + result.Message, _mint);
-            SetStatus("injected", _mint);
-        }
-        else
-        {
-            Log("✕ " + result.Message, _red);
-            SetStatus("failed", _red);
-        }
+        var result = await InjectionService.InjectAsync(_target.Id, _dll);
 
-        SetBusy(false);
+        if (result.Success) Tag("[+]", _green, result.Message);
+        else                Tag("[x]", _red, result.Message);
+        Blank();
+
+        _busy = false;
+        Cmd.IsEnabled = true;
+        Cmd.Focus();
     }
-
-    // ============================ helpers ============================
-
-    private void UpdateReadiness()
-    {
-        BtnInject.IsEnabled = _selected is not null
-                              && !string.IsNullOrEmpty(_dllPath)
-                              && File.Exists(_dllPath);
-    }
-
-    /// <summary>
-    /// A 64-bit injector can only load a 64-bit DLL into a 64-bit process.
-    /// We can't read the DLL's bitness without parsing its PE header, so we
-    /// warn on the one mismatch we *can* see: an x86 target.
-    /// </summary>
-    private void UpdateArchWarning()
-    {
-        if (_selected is { ArchLabel: "x86" })
-        {
-            ArchWarning.Text =
-                "⚠ This target is 32-bit (x86). This injector is x64 and can only " +
-                "inject into 64-bit processes — pick an x64 target.";
-            ArchWarning.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            ArchWarning.Visibility = Visibility.Collapsed;
-        }
-    }
-
-    private void SetBusy(bool busy)
-    {
-        BtnInject.IsEnabled = !busy && _selected is not null && !string.IsNullOrEmpty(_dllPath);
-        BtnBrowse.IsEnabled = !busy;
-        BtnRefresh.IsEnabled = !busy;
-        ProcListBox.IsEnabled = !busy;
-    }
-
-    private void SetStatus(string text, Brush brush)
-    {
-        StatusText.Text = text;
-        StatusDot.Fill = brush;
-    }
-
-    private void Log(string text, Brush brush)
-    {
-        _log.Add(new LogEntry(DateTime.Now.ToString("HH:mm:ss"), text, brush));
-        LogScroller.ScrollToEnd();
-    }
-
-    private sealed record LogEntry(string Time, string Text, Brush Brush);
 }

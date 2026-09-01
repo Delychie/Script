@@ -2,57 +2,31 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- ================================================================
-         fsociety palette — Mr. Robot: phosphor terminal green + fsociety
-         red on a dead-black CRT. Monospace, minimal, a little paranoid.
+         Windows Command Prompt palette — conhost black (#0C0C0C) with the
+         default #CCCCCC foreground, plus the console ANSI green / red /
+         yellow used for status tags. Monochrome by default, like real cmd.
          ================================================================ -->
 
-    <!-- Surfaces -->
-    <Color x:Key="Bg0">#060807</Color>   <!-- window base / terminal -->
-    <Color x:Key="Bg1">#0B0F0C</Color>   <!-- card / panel          -->
-    <Color x:Key="Bg2">#0F1512</Color>   <!-- inset / list          -->
-    <Color x:Key="Bg3">#16201B</Color>   <!-- hover                 -->
-    <Color x:Key="Stroke">#1C2A22</Color><!-- hairline borders      -->
+    <Color x:Key="Console">#0C0C0C</Color> <!-- console background        -->
+    <Color x:Key="TitleBar">#1F1F1F</Color><!-- window title bar          -->
+    <Color x:Key="Stroke">#333333</Color>  <!-- window border / scrollbar -->
+    <Color x:Key="Fg">#CCCCCC</Color>      <!-- default foreground        -->
+    <Color x:Key="Fg1">#9A9A9A</Color>     <!-- secondary                 -->
+    <Color x:Key="Dim">#767676</Color>     <!-- dim / system text         -->
+    <Color x:Key="White">#F2F2F2</Color>   <!-- bright white              -->
+    <Color x:Key="Green">#16C60C</Color>   <!-- ok  [+]                   -->
+    <Color x:Key="Red">#E74856</Color>     <!-- error [x]                 -->
+    <Color x:Key="Yellow">#C19C00</Color>  <!-- warning [!]               -->
 
-    <!-- Text -->
-    <Color x:Key="Text0">#D6F5E3</Color> <!-- primary (green-white)  -->
-    <Color x:Key="Text1">#7FA98F</Color> <!-- secondary             -->
-    <Color x:Key="Text2">#4C6455</Color> <!-- muted                 -->
-
-    <!-- Accents -->
-    <Color x:Key="AccentA">#2BE86B</Color> <!-- phosphor green (primary) -->
-    <Color x:Key="AccentB">#E5352B</Color> <!-- fsociety red             -->
-    <Color x:Key="AccentC">#4CFF8F</Color> <!-- ok / bright green        -->
-    <Color x:Key="Danger">#FF4B4B</Color>  <!-- fail / alert red         -->
-
-    <!-- ================================================================ -->
-
-    <SolidColorBrush x:Key="Bg0Brush"    Color="{StaticResource Bg0}" />
-    <SolidColorBrush x:Key="Bg1Brush"    Color="{StaticResource Bg1}" />
-    <SolidColorBrush x:Key="Bg2Brush"    Color="{StaticResource Bg2}" />
-    <SolidColorBrush x:Key="Bg3Brush"    Color="{StaticResource Bg3}" />
-    <SolidColorBrush x:Key="StrokeBrush" Color="{StaticResource Stroke}" />
-
-    <SolidColorBrush x:Key="Text0Brush"  Color="{StaticResource Text0}" />
-    <SolidColorBrush x:Key="Text1Brush"  Color="{StaticResource Text1}" />
-    <SolidColorBrush x:Key="Text2Brush"  Color="{StaticResource Text2}" />
-
-    <SolidColorBrush x:Key="AccentABrush" Color="{StaticResource AccentA}" />
-    <SolidColorBrush x:Key="AccentBBrush" Color="{StaticResource AccentB}" />
-    <SolidColorBrush x:Key="AccentCBrush" Color="{StaticResource AccentC}" />
-    <SolidColorBrush x:Key="DangerBrush"  Color="{StaticResource Danger}" />
-
-    <!-- Signature action gradient: phosphor green → deep green, used on the
-         primary action and the header rule. Red is reserved for the fsociety
-         mark and alerts, so it stays out of the everyday gradient. -->
-    <LinearGradientBrush x:Key="SocietyBrush" StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Color="{StaticResource AccentA}" Offset="0" />
-        <GradientStop Color="#12A34C" Offset="1" />
-    </LinearGradientBrush>
-
-    <LinearGradientBrush x:Key="WindowBrush" StartPoint="0,0" EndPoint="0.6,1">
-        <GradientStop Color="#060807" Offset="0" />
-        <GradientStop Color="#070B08" Offset="0.55" />
-        <GradientStop Color="#080D0A" Offset="1" />
-    </LinearGradientBrush>
+    <SolidColorBrush x:Key="ConsoleBrush"  Color="{StaticResource Console}" />
+    <SolidColorBrush x:Key="TitleBarBrush" Color="{StaticResource TitleBar}" />
+    <SolidColorBrush x:Key="StrokeBrush"   Color="{StaticResource Stroke}" />
+    <SolidColorBrush x:Key="FgBrush"       Color="{StaticResource Fg}" />
+    <SolidColorBrush x:Key="Fg1Brush"      Color="{StaticResource Fg1}" />
+    <SolidColorBrush x:Key="DimBrush"      Color="{StaticResource Dim}" />
+    <SolidColorBrush x:Key="WhiteBrush"    Color="{StaticResource White}" />
+    <SolidColorBrush x:Key="GreenBrush"    Color="{StaticResource Green}" />
+    <SolidColorBrush x:Key="RedBrush"      Color="{StaticResource Red}" />
+    <SolidColorBrush x:Key="YellowBrush"   Color="{StaticResource Yellow}" />
 
 </ResourceDictionary>
