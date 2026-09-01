@@ -89,6 +89,46 @@ struct ProcInfo {
 static std::vector<ProcInfo> g_procs;   // all processes, from last refresh
 
 // ---------------------------------------------------------------------------
+// Persistence (remember last DLL + last target across sessions)
+//
+// A PID is meaningless next session, so we remember the process *name* and
+// re-select it if it happens to be running again. Stored under HKCU so no
+// admin rights or file paths are needed.
+// ---------------------------------------------------------------------------
+static const wchar_t* kRegPath = L"Software\\SimpleDllInjector";
+
+static std::wstring RegReadString(const wchar_t* name) {
+    std::wstring out;
+    HKEY key;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegPath, 0, KEY_READ, &key) ==
+        ERROR_SUCCESS) {
+        wchar_t buf[1024];
+        DWORD size = sizeof(buf);
+        DWORD type = 0;
+        if (RegQueryValueExW(key, name, nullptr, &type,
+                             reinterpret_cast<LPBYTE>(buf), &size) ==
+                ERROR_SUCCESS &&
+            type == REG_SZ) {
+            out.assign(buf, size / sizeof(wchar_t));
+            if (!out.empty() && out.back() == L'\0') out.pop_back();
+        }
+        RegCloseKey(key);
+    }
+    return out;
+}
+
+static void RegWriteString(const wchar_t* name, const std::wstring& value) {
+    HKEY key;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, kRegPath, 0, nullptr, 0, KEY_WRITE,
+                        nullptr, &key, nullptr) == ERROR_SUCCESS) {
+        RegSetValueExW(key, name, 0, REG_SZ,
+                       reinterpret_cast<const BYTE*>(value.c_str()),
+                       static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+        RegCloseKey(key);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Injection (self-contained; mirrors injector.cpp)
 // ---------------------------------------------------------------------------
 static std::wstring InjectDll(DWORD pid, const std::wstring& dllPathW) {
@@ -228,6 +268,30 @@ static DWORD GetSelectedPid() {
     return static_cast<DWORD>(it.lParam);
 }
 
+static std::wstring GetSelectedName() {
+    int sel = ListView_GetNextItem(g_hList, -1, LVNI_SELECTED);
+    if (sel < 0) return L"";
+    wchar_t buf[MAX_PATH] = {0};
+    ListView_GetItemText(g_hList, sel, 0, buf, MAX_PATH);
+    return buf;
+}
+
+// Select the first visible row whose process name matches (case-insensitive).
+static void SelectProcessByName(const std::wstring& name) {
+    if (name.empty()) return;
+    int count = ListView_GetItemCount(g_hList);
+    for (int i = 0; i < count; i++) {
+        wchar_t buf[MAX_PATH] = {0};
+        ListView_GetItemText(g_hList, i, 0, buf, MAX_PATH);
+        if (_wcsicmp(buf, name.c_str()) == 0) {
+            ListView_SetItemState(g_hList, i, LVIS_SELECTED | LVIS_FOCUSED,
+                                  LVIS_SELECTED | LVIS_FOCUSED);
+            ListView_EnsureVisible(g_hList, i, FALSE);
+            break;
+        }
+    }
+}
+
 static void SetStatus(const std::wstring& msg, bool err) {
     g_status = msg;
     g_statusErr = err;
@@ -351,6 +415,7 @@ static void BrowseForDll(HWND hWnd) {
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
     if (GetOpenFileNameW(&ofn)) {
         SetWindowTextW(g_hDllEdit, file);
+        RegWriteString(L"LastDll", file);  // remember even before injecting
     }
 }
 
@@ -368,6 +433,9 @@ static void DoInject(HWND hWnd) {
     }
     std::wstring err = InjectDll(pid, dll);
     if (err.empty()) {
+        // Remember this DLL and target for next session.
+        RegWriteString(L"LastDll", dll);
+        RegWriteString(L"LastProcess", GetSelectedName());
         SetStatus(L"Injected into PID " + std::to_wstring(pid) + L".", false);
     } else {
         SetStatus(err, true);
@@ -444,6 +512,20 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 
             RefreshProcesses();
             PopulateList();
+
+            // Restore last-used DLL and target process from the previous run.
+            std::wstring lastDll = RegReadString(L"LastDll");
+            if (!lastDll.empty()) SetWindowTextW(g_hDllEdit, lastDll.c_str());
+            std::wstring lastProc = RegReadString(L"LastProcess");
+            if (!lastProc.empty()) {
+                SelectProcessByName(lastProc);
+                std::wstring msg = L"Restored last session. ";
+                if (GetSelectedPid() != 0)
+                    msg += lastProc + L" is running and pre-selected.";
+                else
+                    msg += lastProc + L" isn't running right now.";
+                SetStatus(msg, false);
+            }
             return 0;
         }
 

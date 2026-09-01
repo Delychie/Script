@@ -35,6 +35,15 @@ The status line at the bottom reports success or the exact error.
 Dark theme, rounded flat buttons with hover, a searchable/refreshable process
 list, and a file picker filtered to `*.dll`.
 
+### Remembers your last session
+
+On a successful inject (and when you pick a file with Browse), the GUI saves the
+DLL path and the target's **process name** to
+`HKCU\Software\SimpleDllInjector`. Next launch it restores the DLL path and, if
+that process is running again, pre-selects it — the status line tells you
+whether it's currently running. (PIDs change every run, so the name is what's
+remembered, not the number.)
+
 ## How it works
 
 1. **Find the target** — by process name (`notepad.exe`) or numeric PID.
