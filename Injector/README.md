@@ -23,22 +23,21 @@ Microsoft Windows [Version 10.0.22631.4460]
 (c) Microsoft Corporation. All rights reserved.
 
    com.fsociety // dll injector   v1.0  [x64]
-   [+] hello, friend.  type 'help' for commands.
+  [+] hello, friend.
+      to inject:  dll inject   then paste the dll path and the process path.
+      type 'help' for all commands, 'list' to see running processes.
 
-   #   PID     ARCH   PROCESS
-   --  ------  -----  ------------------------------
-   1*  8241    x64    RobloxPlayerBeta.exe
-   2   1104    x64    explorer.exe
-   3   6620    x64    Discord.exe
-   4   9012    x86    notepad.exe
+C:\fsociety>list
 
-C:\fsociety>select 1
-  [+] target set: RobloxPlayerBeta.exe (8241) [x64]
+   PID     ARCH   PROCESS / PATH
+   ------  -----  --------------------------------------------
+   8241    x64    C:\Program Files (x86)\Roblox\Versions\...\RobloxPlayerBeta.exe
+   1104    x64    C:\Windows\explorer.exe
+   9012    x86    C:\Windows\SysWOW64\notepad.exe
 
-C:\fsociety>browse
-  [+] payload set: dely_payload.dll
-
-C:\fsociety>inject
+C:\fsociety>dll inject
+DLL path: C:\fsociety\bin\dely_payload.dll
+Process path: C:\Program Files (x86)\Roblox\Versions\...\RobloxPlayerBeta.exe
   [*] injecting dely_payload.dll -> RobloxPlayerBeta.exe (8241)...
   [+] Injected dely_payload.dll into RobloxPlayerBeta (8241).
 
@@ -47,18 +46,20 @@ C:\fsociety>_
 
 ## Commands
 
-| command             | what it does                              |
-| ------------------- | ----------------------------------------- |
-| `list` / `ls`       | enumerate running processes (with arch)   |
-| `select <# \| pid>` | choose a target by row number or PID      |
-| `dll <path>`        | set the payload DLL by path               |
-| `browse`            | pick a payload with a file dialog         |
-| `inject`            | inject the payload into the target        |
-| `refresh`           | re-scan processes                         |
-| `cls`               | clear the screen                          |
-| `ver` / `whoami`    | version / identity                        |
-| `help`              | list commands                             |
-| `exit`              | close                                     |
+| command        | what it does                                                    |
+| -------------- | -------------------------------------------------------------- |
+| `dll inject`   | inject a DLL — prompts for the DLL path, then the process path |
+| `list` / `ls`  | enumerate running processes with their full exe paths          |
+| `refresh`      | re-scan processes                                              |
+| `cls`          | clear the screen                                               |
+| `ver`          | version info                                                   |
+| `help`         | list commands                                                  |
+| `exit`         | close                                                          |
+
+**Injecting:** type `dll inject`, paste the payload's `.dll` path when it asks,
+then paste the target process's `.exe` path (copy it from `list`). The injector
+finds the running process at that path and loads the DLL into it. You can also
+do it in one line: `dll inject C:\path\payload.dll`, then paste the process path.
 
 Status tags read like a console: `[+]` success (green), `[!]` warning
 (yellow), `[x]` error (red), `[*]` progress (dim). Errors carry the real
