@@ -1,0 +1,28 @@
+{
+  "name": "spotify-desktop-clone",
+  "version": "1.0.0",
+  "description": "A Spotify desktop UI clone built with Electron. Educational mockup — no real audio or Spotify service.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.example.spotify-desktop-clone",
+    "productName": "Spotify Clone",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*"
+    ],
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg" },
+    "linux": { "target": "AppImage" }
+  }
+}
