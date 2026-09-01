@@ -184,7 +184,7 @@
     display:flex;align-items:center;gap:12px;
     padding:8px;border-radius:6px;cursor:pointer;
   }
-  .lib-item:hover{background:var(--card-hover)}
+  .lib-item:hover{background:#1a1a1a}
   .lib-item.active{background:#333}
   .lib-cover{width:48px;height:48px;border-radius:6px;flex:none;display:grid;place-items:center;color:#fff}
   .lib-cover.round{border-radius:50%}
@@ -203,7 +203,7 @@
     transition:background .4s;
   }
   .main-inner{padding:0 24px 32px}
-  .greet{padding:24px 0 8px;font-size:26px;font-weight:800;letter-spacing:-.5px}
+  .greet{padding:24px 0 8px;font-size:32px;font-weight:700;letter-spacing:-.5px}
   .chips-row{display:flex;gap:8px;padding:8px 0 20px}
   .genre-chip{font-size:14px;font-weight:800;padding:8px 16px;border-radius:500px;background:rgba(255,255,255,.08)}
   .genre-chip:hover{background:rgba(255,255,255,.14)}
@@ -234,7 +234,7 @@
 
   .shelf{margin-top:16px}
   .shelf-head{display:flex;align-items:baseline;justify-content:space-between;padding:8px 0 4px}
-  .shelf-head h2{font-size:24px;font-weight:800;letter-spacing:-.4px}
+  .shelf-head h2{font-size:24px;font-weight:700;letter-spacing:-.4px}
   .shelf-head h2:hover{text-decoration:underline;cursor:pointer}
   .shelf-more{font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.4px}
   .shelf-more:hover{color:#fff;text-decoration:underline}
@@ -848,8 +848,12 @@
     d.addEventListener("click",()=>{
       document.querySelectorAll(".lib-item").forEach(x=>x.classList.remove("active"));
       d.classList.add("active");
-      const kind = it.s.split(" • ")[0];
-      openPlaylist({t:it.n, g:it.g, glyph:it.glyph, round:it.round, kind:kind, owner: it.s.includes("•")? it.s.split(" • ")[1] : "Liam"});
+      const parts = it.s.split(" • ");
+      const kind = parts[0];
+      let owner = "Liam";
+      if(parts[1] && !/\d/.test(parts[1])) owner = parts[1]; // creator/artist, not a count
+      if(kind==="Artist") owner = null;                      // → monthly-listeners line
+      openPlaylist({t:it.n, g:it.g, glyph:it.glyph, round:it.round, kind:kind, owner:owner});
     });
     libList.appendChild(d);
   });
@@ -938,6 +942,7 @@
     updateProgress();
     refreshPlayingRows();
     syncLyrics(tr);
+    reportNP();
   }
 
   function updateProgress(){
@@ -957,6 +962,12 @@
     updateProgress();
   }
 
+  function reportNP(){
+    if(window.desktop && window.desktop.updateNowPlaying){
+      const tr = tracks[idx];
+      window.desktop.updateNowPlaying({ title: tr.t, artist: tr.a, playing });
+    }
+  }
   function play(){
     playing = true;
     playIcon.innerHTML = pauseSVG;
@@ -965,6 +976,7 @@
     // reflect eq animation state in now-playing lib item if present
     clearInterval(timer);
     timer = setInterval(tick, 250);
+    reportNP();
   }
   function pause(){
     playing = false;
@@ -972,6 +984,7 @@
     el("#playBtn").title = "Play";
     player.classList.add("paused");
     clearInterval(timer);
+    reportNP();
   }
   function toggle(){ playing? pause() : play(); }
 
@@ -1296,10 +1309,20 @@
   el("#navSearch").addEventListener("click", goSearch);
   el("#backBtn").addEventListener("click", goHome);
 
+  // ---- system-tray mini controls (Electron only) ----
+  if(window.desktop && window.desktop.onTrayCommand){
+    window.desktop.onTrayCommand(cmd=>{
+      if(cmd==="playpause") toggle();
+      else if(cmd==="next") nextTrack(false);
+      else if(cmd==="prev") prevTrack();
+    });
+  }
+
   // init
   loadTrack(tracks[0]);
   setVol(0.7);
   goHome();
+  reportNP();
 })();
 </script>
 
