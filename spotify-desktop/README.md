@@ -22,6 +22,12 @@ the real PC app.
 - **Synced lyrics panel** that highlights and auto-scrolls the active line.
 - Custom Windows-style title bar with a draggable region and working window
   controls (wired through a secure `contextBridge` preload).
+- Custom app icon and a **system tray** with a mini-controls menu
+  (now-playing, Play/Pause, Previous, Next, Show, Quit).
+- **Minimize to tray**: closing the window hides it to the tray and keeps
+  playing; use the tray's **Quit** (or `Ctrl/Cmd+Q`) to exit for real.
+- **Media-key support**: the keyboard's Play/Pause, Next, and Previous keys
+  control playback even when the window isn't focused.
 
 ## Requirements
 

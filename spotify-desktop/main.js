@@ -1,8 +1,10 @@
-const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, globalShortcut, Notification } = require('electron');
 const path = require('path');
 
 let win = null;
 let tray = null;
+let isQuitting = false;    // true once the user really wants to exit (tray Quit / Cmd+Q)
+let trayHintShown = false; // show the "still running in the tray" note only once
 
 // current now-playing state, mirrored from the renderer for the tray menu
 let np = { title: 'Nothing playing', artist: '', playing: false };
@@ -45,6 +47,23 @@ function createWindow() {
   win.on('maximize', notifyMaxState);
   win.on('unmaximize', notifyMaxState);
   win.on('closed', () => { win = null; });
+
+  // Minimize-to-tray: the close button hides the window instead of quitting.
+  win.on('close', (e) => {
+    if (isQuitting) return;              // real quit — let it through
+    e.preventDefault();
+    win.hide();
+    if (!trayHintShown) {
+      trayHintShown = true;
+      if (Notification.isSupported()) {
+        new Notification({
+          title: 'Still playing',
+          body: 'Spotify keeps running in the tray. Right-click the tray icon for controls, or Quit to exit.',
+          icon: ICON
+        }).show();
+      }
+    }
+  });
 }
 
 // ---- system tray with mini playback controls ----
@@ -69,7 +88,7 @@ function buildTrayMenu() {
     { label: 'Next', click: () => tell('next') },
     { type: 'separator' },
     { label: 'Show Spotify', click: showWindow },
-    { label: 'Quit', click: () => { app.quit(); } }
+    { label: 'Quit', click: () => { isQuitting = true; app.quit(); } }
   ]);
 }
 
@@ -103,14 +122,35 @@ ipcMain.on('np:update', (_e, data) => {
   refreshTray();
 });
 
+// Hardware / keyboard media keys → same commands the tray and UI use.
+function registerMediaKeys() {
+  const map = {
+    'MediaPlayPause': 'playpause',
+    'MediaNextTrack': 'next',
+    'MediaPreviousTrack': 'prev',
+    'MediaStop': 'playpause'
+  };
+  for (const [accel, cmd] of Object.entries(map)) {
+    try { globalShortcut.register(accel, () => tell(cmd)); } catch (_) { /* key unavailable on this OS */ }
+  }
+}
+
 app.whenReady().then(() => {
   createWindow();
   createTray();
+  registerMediaKeys();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else showWindow();
   });
 });
 
+// Cmd+Q / app.quit() from anywhere should exit for real, not hide to tray.
+app.on('before-quit', () => { isQuitting = true; });
+app.on('will-quit', () => { globalShortcut.unregisterAll(); });
+
 app.on('window-all-closed', () => {
+  // With minimize-to-tray the window is hidden, not closed, so this normally
+  // won't fire; keep the standard behavior for an actual quit.
   if (process.platform !== 'darwin') app.quit();
 });
