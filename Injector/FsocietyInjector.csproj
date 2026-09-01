@@ -1,25 +1,26 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
+    <!-- A real console app: launched from Explorer it opens its own conhost
+         window (genuine Command Prompt chrome); run from an existing cmd it
+         uses that window. Either way the console is the real thing. -->
+    <OutputType>Exe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <UseWPF>true</UseWPF>
     <RootNamespace>FsocietyInjector</RootNamespace>
     <AssemblyName>FsocietyInjector</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
 
     <!-- The Win32 injection APIs are architecture-sensitive: a 64-bit target
-         can only inject a 64-bit DLL into a 64-bit process. Roblox is x64, so
-         we build x64 only and never let the runtime fall back to AnyCPU. -->
+         can only inject a 64-bit DLL into a 64-bit process. Build x64 only. -->
     <PlatformTarget>x64</PlatformTarget>
     <Platforms>x64</Platforms>
 
     <Version>1.0.0</Version>
     <Product>fsociety injector</Product>
     <Company>fsociety</Company>
-    <Description>A clean, Mr. Robot-themed Windows DLL injector.</Description>
+    <Description>A Command Prompt DLL injector.</Description>
   </PropertyGroup>
 
 </Project>
