@@ -2,26 +2,27 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- ================================================================
-         mrrpbot society palette — deep indigo night + neon cat accents
+         fsociety palette — Mr. Robot: phosphor terminal green + fsociety
+         red on a dead-black CRT. Monospace, minimal, a little paranoid.
          ================================================================ -->
 
     <!-- Surfaces -->
-    <Color x:Key="Bg0">#0B0A14</Color>   <!-- window base           -->
-    <Color x:Key="Bg1">#12101F</Color>   <!-- card / panel          -->
-    <Color x:Key="Bg2">#1A1730</Color>   <!-- inset / list          -->
-    <Color x:Key="Bg3">#242040</Color>   <!-- hover                 -->
-    <Color x:Key="Stroke">#2E2A4D</Color><!-- hairline borders      -->
+    <Color x:Key="Bg0">#060807</Color>   <!-- window base / terminal -->
+    <Color x:Key="Bg1">#0B0F0C</Color>   <!-- card / panel          -->
+    <Color x:Key="Bg2">#0F1512</Color>   <!-- inset / list          -->
+    <Color x:Key="Bg3">#16201B</Color>   <!-- hover                 -->
+    <Color x:Key="Stroke">#1C2A22</Color><!-- hairline borders      -->
 
     <!-- Text -->
-    <Color x:Key="Text0">#F4F2FF</Color> <!-- primary               -->
-    <Color x:Key="Text1">#B8B2D8</Color> <!-- secondary             -->
-    <Color x:Key="Text2">#6E688F</Color> <!-- muted                 -->
+    <Color x:Key="Text0">#D6F5E3</Color> <!-- primary (green-white)  -->
+    <Color x:Key="Text1">#7FA98F</Color> <!-- secondary             -->
+    <Color x:Key="Text2">#4C6455</Color> <!-- muted                 -->
 
     <!-- Accents -->
-    <Color x:Key="AccentA">#B14CFF</Color> <!-- society violet       -->
-    <Color x:Key="AccentB">#FF5FC8</Color> <!-- mrrp pink            -->
-    <Color x:Key="AccentC">#37E0C4</Color> <!-- ok / mint            -->
-    <Color x:Key="Danger">#FF5470</Color>  <!-- fail / red           -->
+    <Color x:Key="AccentA">#2BE86B</Color> <!-- phosphor green (primary) -->
+    <Color x:Key="AccentB">#E5352B</Color> <!-- fsociety red             -->
+    <Color x:Key="AccentC">#4CFF8F</Color> <!-- ok / bright green        -->
+    <Color x:Key="Danger">#FF4B4B</Color>  <!-- fail / alert red         -->
 
     <!-- ================================================================ -->
 
@@ -40,17 +41,18 @@
     <SolidColorBrush x:Key="AccentCBrush" Color="{StaticResource AccentC}" />
     <SolidColorBrush x:Key="DangerBrush"  Color="{StaticResource Danger}" />
 
-    <!-- The signature society gradient: violet → pink, used on the brand,
-         the primary action, and the header rule. -->
+    <!-- Signature action gradient: phosphor green → deep green, used on the
+         primary action and the header rule. Red is reserved for the fsociety
+         mark and alerts, so it stays out of the everyday gradient. -->
     <LinearGradientBrush x:Key="SocietyBrush" StartPoint="0,0" EndPoint="1,1">
         <GradientStop Color="{StaticResource AccentA}" Offset="0" />
-        <GradientStop Color="{StaticResource AccentB}" Offset="1" />
+        <GradientStop Color="#12A34C" Offset="1" />
     </LinearGradientBrush>
 
     <LinearGradientBrush x:Key="WindowBrush" StartPoint="0,0" EndPoint="0.6,1">
-        <GradientStop Color="#0B0A14" Offset="0" />
-        <GradientStop Color="#0E0C1B" Offset="0.55" />
-        <GradientStop Color="#120E22" Offset="1" />
+        <GradientStop Color="#060807" Offset="0" />
+        <GradientStop Color="#070B08" Offset="0.55" />
+        <GradientStop Color="#080D0A" Offset="1" />
     </LinearGradientBrush>
 
 </ResourceDictionary>

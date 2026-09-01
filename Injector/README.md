@@ -1,9 +1,11 @@
 <div align="center">
 
-# 🐾 mrrpbot society injector
+# f/society injector
 
-**A clean, modern Windows DLL injector.**
-Neon-night WPF UI · one-click `LoadLibrary` injection · x64.
+**A clean, Mr. Robot-themed Windows DLL injector.**
+Phosphor-green terminal UI · one-click `LoadLibrary` injection · x64.
+
+*hello, friend.*
 
 </div>
 
@@ -12,17 +14,18 @@ Neon-night WPF UI · one-click `LoadLibrary` injection · x64.
 ## What it is
 
 A polished desktop injector for loading a DLL into a running process — the
-companion tool for the scripts in this repo. It uses the classic, fully
-documented **remote-thread `LoadLibrary`** technique: no anti-cheat bypasses,
-no obfuscation, no detection evasion — just the standard injection recipe with
-a nice face on it.
+companion tool for the scripts in this repo, dressed in an **fsociety** terminal
+skin. It uses the classic, fully documented **remote-thread `LoadLibrary`**
+technique: no anti-cheat bypasses, no obfuscation, no detection evasion — just
+the standard injection recipe with a nice face on it (a top hat and a monocle,
+specifically).
 
 <div align="center">
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  🐾 mrrpbot society          DLL INJECTOR              — ✕     │
-│ ─────────────────────────────────────────────────────────────│
+│  🎩 fsociety      DLL INJECTOR · HELLO, FRIEND        — ✕      │
+│ ═════════════════════════════════════════════════════════════│
 │                                                                │
 │  TARGET PROCESS      12 running     PAYLOAD DLL                │
 │  ┌───────────────────────────┐    ┌──────────────────┐ ┌────┐ │
@@ -30,12 +33,12 @@ a nice face on it.
 │  ├───────────────────────────┤    └──────────────────┘ └────┘ │
 │  │ • RobloxPlayerBeta   x64  │                                 │
 │  │   RobloxPlayerBeta · 8241 │      ╔══════════════════════╗   │
-│  │ • notepad            x64  │      ║      ⚡ INJECT        ║   │
-│  │ • explorer           x64  │      ╚══════════════════════╝   │
+│  │ • explorer           x64  │      ║      ⚡ INJECT        ║   │
+│  │ • notepad            x86  │      ╚══════════════════════╝   │
 │  └───────────────────────────┘    ACTIVITY                     │
 │                                   ┌──────────────────────────┐ │
 │                                   │ 12:04:11 ✓ Injected …    │ │
-│  ● ready              mrrpbot society · v1.0 · x64            │ │
+│  ● ready                     fsociety · v1.0 · x64            │ │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -49,8 +52,9 @@ a nice face on it.
   target from this 64-bit build (that can never work).
 - **One-click inject** with a readable activity log — every step reports a real
   Win32 reason on failure instead of a bare "failed".
-- **Custom neon-night chrome** — borderless rounded window, society
-  violet→pink gradient, vector mrrpbot mascot (no external image needed).
+- **fsociety terminal chrome** — borderless rounded window, dead-black CRT,
+  phosphor-green + fsociety-red accents, monospace throughout, and a vector
+  fsociety mask (top hat, monocle, handlebar 'stache — no external image needed).
 - **Runs elevated** — the manifest requests administrator so `OpenProcess` /
   `CreateRemoteThread` don't die with "Access is denied".
 
@@ -61,17 +65,17 @@ Requires the **.NET 8 SDK** and **Windows** (WPF is Windows-only).
 ```powershell
 cd Injector
 dotnet build -c Release
-# or open MrrpInjector.sln in Visual Studio 2022 and press F5
+# or open Injector.sln in Visual Studio 2022 and press F5
 ```
 
-The output lands in `Injector/bin/Release/net8.0-windows/MrrpInjector.exe`.
+The output lands in `Injector/bin/Release/net8.0-windows/FsocietyInjector.exe`.
 
 > Building from source? Just run it — the `requireAdministrator` manifest makes
 > Windows prompt for elevation automatically.
 
 ## Use
 
-1. Launch **MrrpInjector.exe** (accept the UAC prompt).
+1. Launch **FsocietyInjector.exe** (accept the UAC prompt).
 2. Pick the target in the left list (type to filter).
 3. **Browse…** to the `.dll` you want to load.
 4. Hit **INJECT**. Watch the activity log for the result.
@@ -95,16 +99,16 @@ the P/Invoke signatures are in [`Native/Native.cs`](Native/Native.cs).
 
 ```
 Injector/
-├─ MrrpInjector.sln
-├─ MrrpInjector.csproj      · net8.0-windows, WPF, x64
+├─ Injector.sln
+├─ FsocietyInjector.csproj  · net8.0-windows, WPF, x64
 ├─ app.manifest            · requireAdministrator + per-monitor DPI
 ├─ App.xaml(.cs)           · resources + global error handler
 ├─ MainWindow.xaml(.cs)    · the UI + wiring
 ├─ Theme/
-│  ├─ Colors.xaml          · society palette
+│  ├─ Colors.xaml          · fsociety palette (green/red on black)
 │  └─ Styles.xaml          · buttons, inputs, list, cards
 ├─ Assets/
-│  └─ Mascot.xaml          · vector mrrpbot mascot (DrawingImage)
+│  └─ Mascot.xaml          · vector fsociety mask (DrawingImage)
 ├─ Models/ProcessModel.cs
 ├─ Native/Native.cs        · kernel32 P/Invoke
 └─ Services/
@@ -123,6 +127,6 @@ Injector/
 
 <div align="center">
 
-*mrrp :3 — made for the mrrpbot society*
+*our democracy has been hacked. — made for fsociety*
 
 </div>

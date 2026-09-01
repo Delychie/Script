@@ -1,8 +1,8 @@
 using System.Diagnostics;
-using MrrpInjector.Models;
-using MrrpInjector.Native;
+using FsocietyInjector.Models;
+using FsocietyInjector.Native;
 
-namespace MrrpInjector.Services;
+namespace FsocietyInjector.Services;
 
 /// <summary>
 /// Enumerates running processes and reports their bitness so the UI can warn

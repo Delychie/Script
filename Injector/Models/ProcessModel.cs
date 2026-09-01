@@ -1,4 +1,4 @@
-namespace MrrpInjector.Models;
+namespace FsocietyInjector.Models;
 
 /// <summary>
 /// One row in the process picker. Immutable snapshot taken at scan time.

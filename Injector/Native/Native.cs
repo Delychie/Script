@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-namespace MrrpInjector.Native;
+namespace FsocietyInjector.Native;
 
 /// <summary>
 /// Thin P/Invoke wrappers over the handful of Win32 calls a classic

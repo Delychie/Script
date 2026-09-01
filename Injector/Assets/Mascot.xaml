@@ -2,140 +2,124 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- ============================================================
-         mrrpbot society mascot  ·  "mrrp" — a neon society cat.
-         Pure vector so it scales to any size with zero external
-         asset and looks razor-sharp on high-DPI screens.
-         Drop it anywhere with:  <Image Source="{StaticResource MrrpMascot}" />
+         fsociety mask — Mr. Robot. Top hat, monocle, handlebar
+         'stache and a wide grin. Pure vector: scales to any size,
+         no external asset, razor-sharp on high-DPI.
+         Drop it anywhere with:  <Image Source="{StaticResource FsocietyMask}" />
          ============================================================ -->
 
-    <DrawingImage x:Key="MrrpMascot">
+    <DrawingImage x:Key="FsocietyMask">
         <DrawingImage.Drawing>
             <DrawingGroup>
 
-                <!-- soft violet halo -->
-                <GeometryDrawing Brush="#22B14CFF">
+                <!-- faint terminal-green glow behind the mask -->
+                <GeometryDrawing Brush="#1F2BE86B">
                     <GeometryDrawing.Geometry>
-                        <EllipseGeometry Center="100,110" RadiusX="96" RadiusY="94" />
+                        <EllipseGeometry Center="100,118" RadiusX="92" RadiusY="90" />
                     </GeometryDrawing.Geometry>
                 </GeometryDrawing>
 
-                <!-- ears (outer) -->
-                <GeometryDrawing>
-                    <GeometryDrawing.Brush>
-                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                            <GradientStop Color="#B14CFF" Offset="0" />
-                            <GradientStop Color="#FF5FC8" Offset="1" />
-                        </LinearGradientBrush>
-                    </GeometryDrawing.Brush>
+                <!-- face -->
+                <GeometryDrawing Brush="#EDE7D6">
+                    <GeometryDrawing.Geometry>
+                        <PathGeometry Figures="M 100,54 C 62,54 48,82 48,112
+                                               C 48,148 72,178 100,184
+                                               C 128,178 152,148 152,112
+                                               C 152,82 138,54 100,54 Z" />
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+
+                <!-- top hat brim + crown -->
+                <GeometryDrawing Brush="#0C0C0C">
                     <GeometryDrawing.Geometry>
                         <GeometryGroup>
-                            <PathGeometry Figures="M 54,72 L 40,20 L 96,54 Z" />
-                            <PathGeometry Figures="M 146,72 L 160,20 L 104,54 Z" />
+                            <EllipseGeometry Center="100,54" RadiusX="60" RadiusY="12" />
+                            <PathGeometry Figures="M 77,54 L 77,23 Q 77,15 85,15
+                                                   L 115,15 Q 123,15 123,23 L 123,54 Z" />
                         </GeometryGroup>
                     </GeometryDrawing.Geometry>
                 </GeometryDrawing>
 
-                <!-- ears (inner) -->
-                <GeometryDrawing Brush="#FF7AD6">
+                <!-- hat band (fsociety red) -->
+                <GeometryDrawing Brush="#E5352B">
                     <GeometryDrawing.Geometry>
-                        <GeometryGroup>
-                            <PathGeometry Figures="M 60,66 L 52,38 L 84,56 Z" />
-                            <PathGeometry Figures="M 140,66 L 148,38 L 116,56 Z" />
-                        </GeometryGroup>
+                        <PathGeometry Figures="M 77,45 L 123,45 L 123,53 L 77,53 Z" />
                     </GeometryDrawing.Geometry>
                 </GeometryDrawing>
 
-                <!-- head -->
-                <GeometryDrawing>
-                    <GeometryDrawing.Brush>
-                        <LinearGradientBrush StartPoint="0,0" EndPoint="0.4,1">
-                            <GradientStop Color="#1E1A38" Offset="0" />
-                            <GradientStop Color="#161230" Offset="1" />
-                        </LinearGradientBrush>
-                    </GeometryDrawing.Brush>
-                    <GeometryDrawing.Pen>
-                        <Pen Thickness="3">
-                            <Pen.Brush>
-                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                    <GradientStop Color="#B14CFF" Offset="0" />
-                                    <GradientStop Color="#FF5FC8" Offset="1" />
-                                </LinearGradientBrush>
-                            </Pen.Brush>
-                        </Pen>
-                    </GeometryDrawing.Pen>
-                    <GeometryDrawing.Geometry>
-                        <EllipseGeometry Center="100,112" RadiusX="72" RadiusY="64" />
-                    </GeometryDrawing.Geometry>
-                </GeometryDrawing>
-
-                <!-- eyes (mint glow) -->
-                <GeometryDrawing Brush="#37E0C4">
-                    <GeometryDrawing.Geometry>
-                        <GeometryGroup>
-                            <EllipseGeometry Center="76,108" RadiusX="13" RadiusY="18" />
-                            <EllipseGeometry Center="124,108" RadiusX="13" RadiusY="18" />
-                        </GeometryGroup>
-                    </GeometryDrawing.Geometry>
-                </GeometryDrawing>
-
-                <!-- pupils -->
-                <GeometryDrawing Brush="#0B0A14">
-                    <GeometryDrawing.Geometry>
-                        <GeometryGroup>
-                            <EllipseGeometry Center="79,110" RadiusX="5" RadiusY="12" />
-                            <EllipseGeometry Center="121,110" RadiusX="5" RadiusY="12" />
-                        </GeometryGroup>
-                    </GeometryDrawing.Geometry>
-                </GeometryDrawing>
-
-                <!-- eye sparkles -->
-                <GeometryDrawing Brush="#EFFFFB">
-                    <GeometryDrawing.Geometry>
-                        <GeometryGroup>
-                            <EllipseGeometry Center="73,102" RadiusX="3" RadiusY="4" />
-                            <EllipseGeometry Center="118,102" RadiusX="3" RadiusY="4" />
-                        </GeometryGroup>
-                    </GeometryDrawing.Geometry>
-                </GeometryDrawing>
-
-                <!-- nose -->
-                <GeometryDrawing Brush="#FF5FC8">
-                    <GeometryDrawing.Geometry>
-                        <PathGeometry Figures="M 92,128 L 108,128 L 100,138 Z" />
-                    </GeometryDrawing.Geometry>
-                </GeometryDrawing>
-
-                <!-- :3 mouth -->
+                <!-- eyebrows (raised, jaunty) -->
                 <GeometryDrawing>
                     <GeometryDrawing.Pen>
-                        <Pen Brush="#FF5FC8" Thickness="3" StartLineCap="Round" EndLineCap="Round" />
-                    </GeometryDrawing.Pen>
-                    <GeometryDrawing.Geometry>
-                        <PathGeometry Figures="M 100,138 L 100,144
-                                               M 100,144 C 94,152 84,150 82,142
-                                               M 100,144 C 106,152 116,150 118,142" />
-                    </GeometryDrawing.Geometry>
-                </GeometryDrawing>
-
-                <!-- whiskers -->
-                <GeometryDrawing>
-                    <GeometryDrawing.Pen>
-                        <Pen Brush="#4A4470" Thickness="2.4" StartLineCap="Round" EndLineCap="Round" />
+                        <Pen Brush="#141414" Thickness="5" StartLineCap="Round" EndLineCap="Round" />
                     </GeometryDrawing.Pen>
                     <GeometryDrawing.Geometry>
                         <GeometryGroup>
-                            <PathGeometry Figures="M 66,130 L 34,124" />
-                            <PathGeometry Figures="M 66,138 L 36,140" />
-                            <PathGeometry Figures="M 134,130 L 166,124" />
-                            <PathGeometry Figures="M 134,138 L 164,140" />
+                            <PathGeometry Figures="M 62,90 Q 80,80 97,91" />
+                            <PathGeometry Figures="M 103,91 Q 120,80 138,90" />
                         </GeometryGroup>
                     </GeometryDrawing.Geometry>
                 </GeometryDrawing>
 
-                <!-- bot bolt on the forehead — the "bot" in mrrpbot -->
-                <GeometryDrawing Brush="#37E0C4">
+                <!-- eyes -->
+                <GeometryDrawing Brush="#141414">
                     <GeometryDrawing.Geometry>
-                        <PathGeometry Figures="M 104,58 L 92,86 L 100,86 L 96,104 L 110,78 L 102,78 Z" />
+                        <GeometryGroup>
+                            <EllipseGeometry Center="79,107" RadiusX="11" RadiusY="13" />
+                            <EllipseGeometry Center="121,107" RadiusX="11" RadiusY="13" />
+                        </GeometryGroup>
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+
+                <!-- eye glints -->
+                <GeometryDrawing Brush="#FAFAF4">
+                    <GeometryDrawing.Geometry>
+                        <GeometryGroup>
+                            <EllipseGeometry Center="75,102" RadiusX="3" RadiusY="3.4" />
+                            <EllipseGeometry Center="117,102" RadiusX="3" RadiusY="3.4" />
+                        </GeometryGroup>
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+
+                <!-- monocle ring + chain (phosphor green) -->
+                <GeometryDrawing>
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="#2BE86B" Thickness="3" />
+                    </GeometryDrawing.Pen>
+                    <GeometryDrawing.Geometry>
+                        <EllipseGeometry Center="121,107" RadiusX="19" RadiusY="19" />
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+                <GeometryDrawing>
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="#2BE86B" Thickness="1.6" />
+                    </GeometryDrawing.Pen>
+                    <GeometryDrawing.Geometry>
+                        <PathGeometry Figures="M 139,116 Q 150,140 145,162" />
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+
+                <!-- handlebar moustache -->
+                <GeometryDrawing Brush="#141414">
+                    <GeometryDrawing.Geometry>
+                        <PathGeometry Figures="M 100,126 C 86,128 74,130 64,123
+                                               C 68,140 86,142 100,132
+                                               C 114,142 132,140 136,123
+                                               C 126,130 114,128 100,126 Z" />
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+
+                <!-- wide grin (open) -->
+                <GeometryDrawing Brush="#1A130E">
+                    <GeometryDrawing.Geometry>
+                        <PathGeometry Figures="M 70,140 Q 100,182 130,140
+                                               Q 100,160 70,140 Z" />
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+
+                <!-- pointed goatee -->
+                <GeometryDrawing Brush="#141414">
+                    <GeometryDrawing.Geometry>
+                        <PathGeometry Figures="M 90,161 Q 100,171 110,161 L 100,187 Z" />
                     </GeometryDrawing.Geometry>
                 </GeometryDrawing>
 

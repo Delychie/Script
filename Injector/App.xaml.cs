@@ -1,7 +1,7 @@
 using System.Windows;
 using System.Windows.Threading;
 
-namespace MrrpInjector;
+namespace FsocietyInjector;
 
 public partial class App : Application
 {
@@ -16,7 +16,7 @@ public partial class App : Application
     {
         MessageBox.Show(
             e.Exception.Message,
-            "mrrpbot society injector — something went wrong",
+            "fsociety injector — something went wrong",
             MessageBoxButton.OK,
             MessageBoxImage.Warning);
         e.Handled = true;

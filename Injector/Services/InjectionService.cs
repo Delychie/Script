@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text;
-using MrrpInjector.Native;
+using FsocietyInjector.Native;
 
-namespace MrrpInjector.Services;
+namespace FsocietyInjector.Services;
 
 /// <summary>The outcome of an inject attempt, ready to print to the log.</summary>
 public readonly record struct InjectionResult(bool Success, string Message)

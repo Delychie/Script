@@ -1,12 +1,12 @@
-<Window x:Class="MrrpInjector.MainWindow"
+<Window x:Class="FsocietyInjector.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="mrrpbot society injector"
+        Title="fsociety injector"
         Height="640" Width="960"
         MinHeight="560" MinWidth="820"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None" AllowsTransparency="True"
-        Background="Transparent" FontFamily="Segoe UI">
+        Background="Transparent" FontFamily="Consolas">
 
     <!-- Rounded, borderless shell -->
     <Border CornerRadius="18" Background="{StaticResource WindowBrush}"
@@ -27,15 +27,15 @@
                     MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" Padding="18,14,10,10">
                 <Grid>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Image Source="{StaticResource MrrpMascot}" Width="42" Height="42" />
+                        <Image Source="{StaticResource FsocietyMask}" Width="44" Height="44" />
                         <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="mrrpbot" FontSize="17" FontWeight="Bold"
+                                <TextBlock Text="f" FontSize="18" FontWeight="Bold"
+                                           Foreground="{StaticResource AccentABrush}" />
+                                <TextBlock Text="society" FontSize="18" FontWeight="Bold"
                                            Foreground="{StaticResource Text0Brush}" />
-                                <TextBlock Text="society" FontSize="17" FontWeight="Bold"
-                                           Margin="6,0,0,0" Foreground="{StaticResource AccentBBrush}" />
                             </StackPanel>
-                            <TextBlock Text="DLL INJECTOR" FontSize="10" FontWeight="SemiBold"
+                            <TextBlock Text="DLL INJECTOR · HELLO, FRIEND" FontSize="9.5" FontWeight="SemiBold"
                                        Foreground="{StaticResource Text2Brush}"
                                        Margin="1,1,0,0" />
                         </StackPanel>
@@ -241,7 +241,7 @@
                     </StackPanel>
                     <TextBlock HorizontalAlignment="Right" VerticalAlignment="Center"
                                FontSize="11" Foreground="{StaticResource Text2Brush}">
-                        <Run Text="mrrpbot society" Foreground="{StaticResource AccentBBrush}" />
+                        <Run Text="fsociety" Foreground="{StaticResource AccentBBrush}" />
                         <Run Text="· v1.0 · x64" />
                     </TextBlock>
                 </Grid>

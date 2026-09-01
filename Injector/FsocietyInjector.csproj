@@ -6,8 +6,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <RootNamespace>MrrpInjector</RootNamespace>
-    <AssemblyName>MrrpInjector</AssemblyName>
+    <RootNamespace>FsocietyInjector</RootNamespace>
+    <AssemblyName>FsocietyInjector</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
 
     <!-- The Win32 injection APIs are architecture-sensitive: a 64-bit target
@@ -17,9 +17,9 @@
     <Platforms>x64</Platforms>
 
     <Version>1.0.0</Version>
-    <Product>mrrpbot society injector</Product>
-    <Company>mrrpbot society</Company>
-    <Description>A clean Windows DLL injector for the mrrpbot society.</Description>
+    <Product>fsociety injector</Product>
+    <Company>fsociety</Company>
+    <Description>A clean, Mr. Robot-themed Windows DLL injector.</Description>
   </PropertyGroup>
 
 </Project>

@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MrrpInjector", "MrrpInjector.csproj", "{4B2C9E1A-7F3D-4A6B-9C2E-1D8F5A3B7C90}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FsocietyInjector", "FsocietyInjector.csproj", "{4B2C9E1A-7F3D-4A6B-9C2E-1D8F5A3B7C90}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

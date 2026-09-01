@@ -4,10 +4,10 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.Win32;
-using MrrpInjector.Models;
-using MrrpInjector.Services;
+using FsocietyInjector.Models;
+using FsocietyInjector.Services;
 
-namespace MrrpInjector;
+namespace FsocietyInjector;
 
 public partial class MainWindow : Window
 {
@@ -39,7 +39,7 @@ public partial class MainWindow : Window
         Loaded += (_, _) =>
         {
             RefreshProcesses();
-            Log("mrrpbot society injector ready. pick a target and a dll. mrrp :3", _mint);
+            Log("hello, friend. select a target and a payload to begin.", _mint);
         };
     }
 
