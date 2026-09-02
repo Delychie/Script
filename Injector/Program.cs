@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Microsoft.Win32;
 using FsocietyInjector.Models;
 using FsocietyInjector.Services;
 
@@ -41,6 +42,9 @@ internal static class Program
     private static ConsoleColor _fg;
     private static ConsoleColor _bg;
 
+    // The real Windows version of this machine, as cmd would print it.
+    private static readonly string WinVer = DetectWinVer();
+
     private static void Main()
     {
         // Windows prepends "Administrator: " to an elevated console's title.
@@ -51,7 +55,7 @@ internal static class Program
         if (string.IsNullOrEmpty(_cwd) || !Directory.Exists(_cwd)) _cwd = Directory.GetCurrentDirectory();
         LoadCfg();
 
-        Console.WriteLine("Microsoft Windows [Version 10.0.22631.4460]");
+        Console.WriteLine($"Microsoft Windows [Version {WinVer}]");
         Console.WriteLine("(c) Microsoft Corporation. All rights reserved.");
         Console.WriteLine();
 
@@ -102,7 +106,7 @@ internal static class Program
             case "hostname": Console.WriteLine(Environment.MachineName); break;
             case "ver":
                 Console.WriteLine();
-                Console.WriteLine("Microsoft Windows [Version 10.0.22631.4460]");
+                Console.WriteLine($"Microsoft Windows [Version {WinVer}]");
                 Console.WriteLine();
                 break;
             case "help": case "?": Help(); break;
@@ -359,6 +363,29 @@ internal static class Program
         Console.ReadLine();
     }
 
+    /// <summary>
+    /// Reads this machine's real Windows version the way cmd does: the build
+    /// number plus the UBR (update build revision) from the registry, e.g.
+    /// "10.0.26100.4652". Falls back to <see cref="Environment.OSVersion"/> if
+    /// the registry can't be read.
+    /// </summary>
+    private static string DetectWinVer()
+    {
+        var v = Environment.OSVersion.Version;
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(
+                @"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
+            var build = key?.GetValue("CurrentBuildNumber") as string;
+            if (!string.IsNullOrEmpty(build))
+                return key?.GetValue("UBR") is int ubr
+                    ? $"{v.Major}.{v.Minor}.{build}.{ubr}"
+                    : $"{v.Major}.{v.Minor}.{build}";
+        }
+        catch { /* registry unreadable — fall through */ }
+        return $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}";
+    }
+
     /// <summary>Expands the $-codes of a cmd PROMPT template into the prompt.</summary>
     private static string BuildPrompt()
     {
@@ -382,7 +409,7 @@ internal static class Program
                 case 'D': sb.Append($"{DateTime.Now:ddd MM/dd/yyyy}"); break;
                 case 'T': sb.Append($"{DateTime.Now:HH:mm:ss.ff}"); break;
                 case 'N': sb.Append(_cwd.Length > 0 ? _cwd[0] : 'C'); break;
-                case 'V': sb.Append("Microsoft Windows [Version 10.0.22631.4460]"); break;
+                case 'V': sb.Append($"Microsoft Windows [Version {WinVer}]"); break;
                 case '_': sb.Append('\n'); break;
                 default: sb.Append('$').Append(t[i]); break;
             }
