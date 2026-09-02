@@ -47,12 +47,13 @@ can just press Enter to reuse it (or edit it). Stored in
 
 ## Commands
 
+The injector's own verbs:
+
 | command        | what it does                                                    |
 | -------------- | -------------------------------------------------------------- |
 | `dll inject`   | inject a DLL — prompts for the DLL path, then the process path |
 | `list` / `ls`  | enumerate running processes with their full exe paths          |
 | `refresh`      | re-scan processes                                              |
-| `cls`          | clear the screen                                               |
 | `help`         | list commands                                                  |
 | `exit`         | close                                                          |
 
@@ -63,6 +64,32 @@ running process at that path and loads the DLL into it. One-liner also works:
 
 Status tags: `[+]` success (green), `[x]` error (red), `[*]` progress (grey).
 Errors carry the real Win32 reason, so a failed inject tells you *why*.
+
+### Real cmd built-ins
+
+Because the window *is* a Command Prompt, the built-ins you reach for by habit
+work like the real thing:
+
+| command             | what it does                                                       |
+| ------------------- | ----------------------------------------------------------------- |
+| `color`             | set screen colours — `color 0a` (black bg, light-green fg), etc.   |
+| `cls`               | clear the screen                                                   |
+| `title`             | set the window title — `title fsociety`                            |
+| `echo`              | print a message; `echo off` / `echo on` / `echo.`                 |
+| `cd` / `chdir`      | change directory (drives the prompt); bare `cd` prints it         |
+| `dir`               | list the current directory                                        |
+| `prompt`            | change the prompt with `$`-codes — `prompt $P$G`, `prompt $T$G`   |
+| `set`               | list, filter (`set PATH`), or assign (`set X=1`) env vars          |
+| `date` / `time`     | show the date / time (`/t` for the value alone)                   |
+| `ver`               | print the Windows version banner                                  |
+| `whoami` / `hostname` | current user / machine name                                     |
+| `pause`             | *Press any key to continue . . .*                                 |
+
+`color` takes the real two-hex-nibble attribute (background nibble, then
+foreground) from cmd's 16-colour table — so `0A` is the classic black-on-green,
+`1F` is bright-white-on-blue, and same-fg-and-bg is refused just like cmd. Bare
+`color` restores the default `07`. The prompt honours the usual `$P $G $T $D $N
+$$` codes, and `cd` updates the `$P` part live.
 
 ## Build & run
 
