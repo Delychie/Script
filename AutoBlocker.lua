@@ -18,26 +18,27 @@
 -- need executor functions and no-op safely when they aren't available.
 
 --// ============================ CONFIG ============================
-local BLOCK_ON_JOIN   = true   -- block one random non-friend each time the script starts
-local HOP_AFTER_BLOCK = true   -- after blocking, teleport to a fresh server automatically
+local BLOCK_ON_JOIN   = true   -- block one random non-friend the moment the script runs
+local HOP_AFTER_BLOCK = false  -- OFF: only block, never server-hop
 local AVOID_FRIENDS   = true   -- never block friends (leave this on)
-local AUTO_CHAIN      = true   -- re-run this script automatically after each hop (needs SELF_URL + queue_on_teleport)
+local AUTO_CHAIN      = false  -- (only relevant if hopping is on)
 
-local BLOCK_DELAY     = 2.0    -- seconds to wait after joining (let players load) before blocking
-local HOP_DELAY       = 1.5    -- seconds to wait after blocking before hopping
-local MAX_BLOCKS      = 0      -- stop blocking after this many total blocks (0 = no limit); hopping continues
+local BLOCK_DELAY     = 0      -- seconds to wait before blocking (0 = instant)
+local HOP_DELAY       = 1.5    -- seconds to wait after blocking before hopping (only if hopping)
+local MAX_BLOCKS      = 0      -- stop blocking after this many total blocks (0 = no limit)
 
 -- If the silent block module can't be found on your client, fall back to the native
--- block prompt (StarterGui SetCore "PromptBlockPlayer"). This always works but pops the
--- game's block dialog you tap once. Set false to only ever block silently.
+-- block prompt (StarterGui SetCore "PromptBlockPlayer"). This always works on any client.
 local USE_PROMPT_FALLBACK = true
+-- When that native prompt is used, try to auto-confirm it AND hide the dialog, so the
+-- block still happens with (as far as possible) no GUI and no tap. Best-effort: the
+-- confirm button is fired via the executor's getconnections and the dialog is hidden.
+local AUTO_ACCEPT_PROMPT  = true
 
 local NOTIFY          = true   -- show Roblox toast notifications for what it's doing
-local STATE_FILE      = "dely_autoblocker.json" -- remembers visited servers + total block count (executor fs)
+local STATE_FILE      = "dely_autoblocker.json" -- remembers total block count (executor fs)
 
--- To auto-chain across hops, put the RAW url this script is hosted at here (e.g. a
--- raw GitHub link ending in AutoBlocker.lua). Leave "" to disable auto-chain - the
--- script still blocks + hops once per run; use your executor's auto-execute to repeat.
+-- Only used if HOP_AFTER_BLOCK + AUTO_CHAIN are on: raw url this script is hosted at.
 local SELF_URL        = ""
 --// ================================================================
 
@@ -238,12 +239,79 @@ local function isAlreadyBlocked(blockUtil, userId: number): boolean
 	return blocked
 end
 
--- Native block prompt: always registered by the CoreScripts, works on any client, but
--- shows the game's block dialog for a single tap. Used only when no silent module exists.
+-- Fire a button's handlers directly (no real click needed, works while hidden) via the
+-- executor's getconnections. Returns true if it fired anything.
+local function fireButton(btn: Instance): boolean
+	if type(getconnections) ~= "function" then return false end
+	local fired = false
+	local signals = {}
+	pcall(function() table.insert(signals, (btn :: any).Activated) end)
+	pcall(function() table.insert(signals, (btn :: any).MouseButton1Click) end)
+	pcall(function() table.insert(signals, (btn :: any).MouseButton1Down) end)
+	for _, sig in ipairs(signals) do
+		local ok, conns = pcall(getconnections, sig)
+		if ok and type(conns) == "table" then
+			for _, c in ipairs(conns) do
+				pcall(function() if c.Fire then c:Fire() end end)
+				pcall(function() if c.Function then task.spawn(c.Function) end end)
+				fired = true
+			end
+		end
+	end
+	return fired
+end
+
+local function looksLikeConfirm(btn: Instance): boolean
+	local name = btn.Name:lower()
+	if name:find("cancel") or name:find("close") or name:find("report") or name:find("dismiss") then
+		return false
+	end
+	local text = ""
+	pcall(function() text = ((btn :: any).Text or ""):lower() end)
+	if text == "cancel" or text == "close" then return false end
+	return text == "block"
+		or text == "confirm"
+		or text == "yes"
+		or name:find("confirm") ~= nil
+		or name:find("block") ~= nil
+		or name == "primarybutton"
+end
+
+-- After the native prompt fires, find its confirm button, fire it, and hide the dialog,
+-- so the block goes through with no visible GUI and no manual tap. Best-effort.
+local function autoAcceptPrompt()
+	if not AUTO_ACCEPT_PROMPT then return end
+	task.spawn(function()
+		local deadline = os.clock() + 3
+		while os.clock() < deadline do
+			for _, d in ipairs(CoreGui:GetDescendants()) do
+				if (d:IsA("TextButton") or d:IsA("ImageButton")) and looksLikeConfirm(d) then
+					local visible = true
+					pcall(function() visible = (d :: any).Visible end)
+					if visible then
+						if fireButton(d) then
+							-- Hide whatever container the prompt lives in, as cleanup.
+							pcall(function()
+								local sg = d:FindFirstAncestorWhichIsA("ScreenGui")
+								if sg then sg.Enabled = false end
+							end)
+							return
+						end
+					end
+				end
+			end
+			task.wait()
+		end
+	end)
+end
+
+-- Native block prompt: always registered by the CoreScripts, works on any client.
 local function promptBlock(target: Player): boolean
-	return (pcall(function()
+	local ok = pcall(function()
 		StarterGui:SetCore("PromptBlockPlayer", target)
-	end)) and true or false
+	end)
+	if ok then autoAcceptPrompt() end
+	return ok
 end
 
 -- Returns "silent", "prompt", or nil.
@@ -323,10 +391,14 @@ local function blockRandom(): boolean
 		notify("Auto Blocker", ("Blocked %s  (total %d)"):format(target.Name, state.blocks))
 		return true
 	elseif method == "prompt" then
-		-- The native dialog is up; count it optimistically so hopping still progresses.
+		-- Native prompt path: auto-accept fires in the background and hides the dialog.
+		-- If AUTO_ACCEPT_PROMPT is off (or couldn't fire), you'll see the dialog to tap.
 		state.blocks += 1
 		saveState()
-		notify("Auto Blocker", ("Tap Block to block %s"):format(target.Name), 6)
+		local msg = AUTO_ACCEPT_PROMPT
+			and ("Blocking %s..."):format(target.Name)
+			or ("Tap Block to block %s"):format(target.Name)
+		notify("Auto Blocker", msg, 5)
 		return true
 	end
 
@@ -464,7 +536,7 @@ _G.AutoBlocker = {
 
 task.spawn(function()
 	if BLOCK_ON_JOIN then
-		task.wait(BLOCK_DELAY)
+		if BLOCK_DELAY > 0 then task.wait(BLOCK_DELAY) end
 		blockRandom()
 	end
 	if HOP_AFTER_BLOCK then

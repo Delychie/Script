@@ -190,14 +190,13 @@ survives respawns (`ResetOnSpawn = false`).
 
 ---
 
-# Auto Blocker (server hop)
+# Auto Blocker
 
-`AutoBlocker.lua` is a separate client-side script for people who keep getting
-matched back into the **same server** when they hop. Every time you join a server it
-blocks **one random player who is not your friend**, then (optionally) teleports you
-into a fresh server you haven't visited yet. Roblox matchmaking avoids putting you in
-servers full of people you've blocked, so a growing block list is what actually breaks
-the "same server again" loop.
+`AutoBlocker.lua` is a separate client-side script that **instantly blocks one random
+player who is not your friend** the moment you run it - no server hopping, just the
+block. It's meant for building up a block list (blocked players are hidden from you and
+matchmaking tries to keep you out of servers full of them). Server hopping is included
+but **off by default**; flip `HOP_AFTER_BLOCK` on if you want it.
 
 **Friends are never blocked.** If the friend check for a candidate can't complete for
 any reason, that candidate is skipped, so a friend can't be blocked by accident.
@@ -207,47 +206,43 @@ Nothing targets a specific person; the pick is random.
 
 ## Install
 
-Run `AutoBlocker.lua` from a client-side script runner (executor). It uses executor
-functions for the server-list fetch, the "remember visited servers" file, and
-auto-chaining across hops; each of those degrades gracefully (no-op) when the
-function isn't available.
+Run `AutoBlocker.lua` from a client-side script runner (executor). Run it again each
+time you want to block someone (or drop it in your executor's auto-execute).
 
-## What it does on each run
+## What it does
 
-1. Waits `BLOCK_DELAY` seconds for players to load.
-2. Picks a random player who is **not you, not a friend, and not already blocked**, and
-   blocks them. Newer Roblox clients no longer keep a `BlockingUtility` module at a
+1. Instantly picks a random player who is **not you, not a friend, and not already
+   blocked**.
+2. Blocks them. Newer Roblox clients no longer keep a `BlockingUtility` module at a
    fixed path, so the blocker is found by behaviour: it scans Roblox's own loaded
    modules (`getloadedmodules`, restricted to `CoreGui`/`CorePackages` so game code is
    never touched) for one exposing `BlockPlayerAsync`, then tries the known
    `BlockingUtility` paths, then a `PlayerDropDown:CreateBlockingUtility()`, then a
-   descendant search. If none exist on your client it falls back to the native block
-   prompt (`SetCore "PromptBlockPlayer"`), which always works but needs one tap.
-3. If `HOP_AFTER_BLOCK` is on, lists the game's public servers, drops the ones you've
-   already visited and the full ones, and `TeleportToPlaceInstance`s you into a random
-   remaining one. Visited server ids are remembered in `dely_autoblocker.json` so it
-   keeps finding new ones. If it runs out (or can't list servers) it clears the memory
-   and falls back to normal matchmaking (`TeleportService:Teleport`).
+   descendant search. When that works the block is **silent - no GUI at all**.
+3. If no silent module exists on your client, it falls back to the native block prompt
+   (`SetCore "PromptBlockPlayer"`) and then, with `AUTO_ACCEPT_PROMPT` on, **auto-confirms
+   and hides that dialog** for you (fires the confirm button via `getconnections`, then
+   disables the dialog's `ScreenGui`). Best-effort - if it can't fire the button you'll
+   see the dialog to tap once.
 
 ## Config (top of the file)
 
-- `BLOCK_ON_JOIN` - block a random non-friend when the script starts (default on).
-- `HOP_AFTER_BLOCK` - server-hop after blocking (default on). Turn off if you hop
-  yourself and only want the blocker.
+- `BLOCK_ON_JOIN` - block a random non-friend when the script runs (default on).
+- `HOP_AFTER_BLOCK` - server-hop after blocking (default **off** - block only).
 - `AVOID_FRIENDS` - never block friends (leave on).
-- `AUTO_CHAIN` + `SELF_URL` - to make hops chain by themselves, set `SELF_URL` to the
-  raw URL you host this script at; the script `queue_on_teleport`s a loader so it
-  re-runs on arrival. Left blank, it still blocks + hops once per run - use your
-  executor's auto-execute to repeat.
-- `BLOCK_DELAY` / `HOP_DELAY` - timing before blocking / before hopping.
-- `MAX_BLOCKS` - stop blocking after N total (0 = unlimited); hopping still continues.
+- `BLOCK_DELAY` - seconds before blocking (default `0` = instant).
+- `MAX_BLOCKS` - stop blocking after N total (0 = unlimited).
 - `USE_PROMPT_FALLBACK` - if no silent block module is found, use the native block
-  prompt (one tap). Turn off to only ever block silently.
+  prompt. Turn off to only ever block silently.
+- `AUTO_ACCEPT_PROMPT` - auto-confirm + hide that native prompt so it stays GUI-less
+  (default on).
 - `NOTIFY` - Roblox toast notifications for each action.
-- `STATE_FILE` - the file used to remember visited servers + total block count.
+- `AUTO_CHAIN` + `SELF_URL` / `HOP_DELAY` / `STATE_FILE` - only relevant if you turn
+  hopping back on.
 
 ## Manual controls
 
 While it's loaded, `_G.AutoBlocker` exposes `blockNow()`, `hop()`, `blockAndHop()`, and
-`debug()`. Run `_G.AutoBlocker.debug()` to print (to the console) exactly what blocking
-methods your executor/client exposes - handy if a block ever fails to land.
+`debug()`. Run `_G.AutoBlocker.blockNow()` to block another random person on demand, or
+`_G.AutoBlocker.debug()` to print (to the console) exactly what blocking methods your
+executor/client exposes - handy if a block ever fails to land.
