@@ -208,10 +208,14 @@ Nothing targets a specific person; the pick is random.
 
 Run `AutoBlocker.lua` from a client-side script runner (executor). Run it again each
 time you want to block someone, or **drop it in your executor's auto-execute** to block
-on every join. Auto-execute fires before the game is ready, so the script waits for the
-game to load, for your `LocalPlayer`, and for at least one other player to stream in
-(`READY_TIMEOUT` / `PLAYER_TIMEOUT`) before it blocks - on a manual run everything's
-already loaded so it's instant.
+on every join. Auto-execute often fires at the menu / loading screen before the game is
+ready, so the script waits (as long as needed) for the game to load, for your
+`LocalPlayer` and character, and then keeps retrying until at least one other player has
+streamed in and gets blocked. On a manual run everything's already loaded so it's instant.
+
+If an auto-execute run does nothing, open **`dely_autoblocker_log.txt`** in your
+executor's workspace folder - the script logs every stage there (start, ready, each
+block attempt, and any error), which shows exactly where it stopped.
 
 ## What it does
 

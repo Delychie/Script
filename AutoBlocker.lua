@@ -92,6 +92,21 @@ local hasFS = (typeof(writefile) == "function")
 	and (typeof(readfile) == "function")
 	and (typeof(isfile) == "function")
 
+-- A log file so we can see what happened on an auto-execute run (you can't watch the
+-- console during a join). Open dely_autoblocker_log.txt in your executor's workspace.
+local LOG_FILE = "dely_autoblocker_log.txt"
+local logBuffer = ""
+local function log(msg: string)
+	local stamp = "?"
+	pcall(function() stamp = os.date("%X") end)
+	local entry = ("[%s] %s"):format(stamp, tostring(msg))
+	print("[AutoBlocker] " .. tostring(msg))
+	logBuffer = logBuffer .. entry .. "\n"
+	if hasFS then
+		pcall(function() writefile(LOG_FILE, logBuffer) end)
+	end
+end
+
 local state = { visited = {}, blocks = 0 }
 
 local function loadState()
@@ -601,21 +616,28 @@ end
 
 --// ------------------------ readiness (for auto-execute) ------------------------
 
--- Auto-execute injects before the client is ready. Wait for the game to load and for
--- LocalPlayer to exist (reassigning the upvalue every function shares), so friend checks
--- and the block prompt actually work.
+-- Auto-execute injects before the client is ready - often at the menu / loading screen,
+-- before LocalPlayer or the game exists. Wait (indefinitely, in small steps) for the game
+-- to load and for a real in-game LocalPlayer, reassigning the shared upvalue.
 local function waitUntilReady(): boolean
-	if not game:IsLoaded() then
-		pcall(function() game.Loaded:Wait() end)
+	local waited = 0
+	while not game:IsLoaded() do
+		task.wait(0.2); waited += 0.2
+		if waited > 600 then return false end
 	end
-	local deadline = os.clock() + READY_TIMEOUT
-	while not Players.LocalPlayer and os.clock() < deadline do
-		task.wait(0.1)
+	-- Wait for LocalPlayer. No hard timeout: auto-exec at the menu can sit here for a long
+	-- time until you actually join a game, and that's fine - we just want to be ready then.
+	while not Players.LocalPlayer do
+		task.wait(0.2); waited += 0.2
+		if waited > 600 then return false end
 	end
 	LocalPlayer = Players.LocalPlayer
-	if not LocalPlayer then return false end
-	pcall(function() LocalPlayer:WaitForChild("PlayerGui", 10) end)
-	return true
+	pcall(function() LocalPlayer:WaitForChild("PlayerGui", 30) end)
+	-- Wait for our character too (means we're truly in-game, not on a loading screen).
+	if not LocalPlayer.Character then
+		pcall(function() LocalPlayer.CharacterAdded:Wait() end)
+	end
+	return LocalPlayer ~= nil
 end
 
 -- Wait until there's at least one other player to block (they stream in after you join).
@@ -654,17 +676,48 @@ _G.AutoBlocker = {
 }
 
 task.spawn(function()
-	if not waitUntilReady() then
-		notify("Auto Blocker", "Gave up waiting for the game to load.")
-		return
-	end
-	if BLOCK_ON_JOIN then
-		if BLOCK_DELAY > 0 then task.wait(BLOCK_DELAY) end
-		waitForOtherPlayers(PLAYER_TIMEOUT)
-		blockRandom()
-	end
-	if HOP_AFTER_BLOCK then
-		task.wait(HOP_DELAY)
-		serverHop()
+	local ok, err = pcall(function()
+		log(("start: placeId=%s jobId=%s loaded=%s localplayer=%s players=%d")
+			:format(tostring(game.PlaceId), tostring(game.JobId), tostring(game:IsLoaded()),
+				tostring(Players.LocalPlayer and Players.LocalPlayer.Name), #Players:GetPlayers()))
+
+		if not waitUntilReady() then
+			log("waitUntilReady failed - gave up")
+			notify("Auto Blocker", "Gave up waiting for the game to load.")
+			return
+		end
+		log(("ready: localplayer=%s character=%s")
+			:format(tostring(LocalPlayer and LocalPlayer.Name), tostring(LocalPlayer.Character ~= nil)))
+
+		if BLOCK_ON_JOIN then
+			if BLOCK_DELAY > 0 then task.wait(BLOCK_DELAY) end
+			-- Keep trying until we actually block one person. Players stream in over time,
+			-- and if auto-exec ran early there may be nobody for a while.
+			local blocked = false
+			local attempt = 0
+			while not blocked and attempt < 30 do
+				attempt += 1
+				local found = waitForOtherPlayers(PLAYER_TIMEOUT)
+				log(("attempt %d: otherPlayers=%s (total %d)")
+					:format(attempt, tostring(found), #Players:GetPlayers()))
+				if found then
+					blocked = blockRandom()
+					log("attempt " .. attempt .. ": blockRandom -> " .. tostring(blocked))
+				end
+				if not blocked then task.wait(3) end
+			end
+			if not blocked then
+				log("gave up after retries without blocking")
+			end
+		end
+
+		if HOP_AFTER_BLOCK then
+			task.wait(HOP_DELAY)
+			serverHop()
+		end
+	end)
+	if not ok then
+		log("FATAL error in main: " .. tostring(err))
+		notify("Auto Blocker", "Error: " .. tostring(err), 8)
 	end
 end)
