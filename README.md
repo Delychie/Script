@@ -216,8 +216,12 @@ function isn't available.
 
 1. Waits `BLOCK_DELAY` seconds for players to load.
 2. Picks a random player who is **not you, not a friend, and not already blocked**, and
-   blocks them via the game's own `BlockingUtility` (the path is looked up across the
-   few locations Roblox has used, with a descendant-search fallback).
+   blocks them. Newer Roblox clients no longer keep a `BlockingUtility` module at a
+   fixed path, so the blocker is found by behaviour: it scans loaded modules
+   (`getloadedmodules`) for one exposing `BlockPlayerAsync`, then tries the known
+   `BlockingUtility` paths, then a `PlayerDropDown:CreateBlockingUtility()`, then a
+   descendant search. If none exist on your client it falls back to the native block
+   prompt (`SetCore "PromptBlockPlayer"`), which always works but needs one tap.
 3. If `HOP_AFTER_BLOCK` is on, lists the game's public servers, drops the ones you've
    already visited and the full ones, and `TeleportToPlaceInstance`s you into a random
    remaining one. Visited server ids are remembered in `dely_autoblocker.json` so it
@@ -236,10 +240,13 @@ function isn't available.
   executor's auto-execute to repeat.
 - `BLOCK_DELAY` / `HOP_DELAY` - timing before blocking / before hopping.
 - `MAX_BLOCKS` - stop blocking after N total (0 = unlimited); hopping still continues.
+- `USE_PROMPT_FALLBACK` - if no silent block module is found, use the native block
+  prompt (one tap). Turn off to only ever block silently.
 - `NOTIFY` - Roblox toast notifications for each action.
 - `STATE_FILE` - the file used to remember visited servers + total block count.
 
 ## Manual controls
 
-While it's loaded, `_G.AutoBlocker` exposes `blockNow()`, `hop()`, and `blockAndHop()`
-so you can fire a block or a hop on demand.
+While it's loaded, `_G.AutoBlocker` exposes `blockNow()`, `hop()`, `blockAndHop()`, and
+`debug()`. Run `_G.AutoBlocker.debug()` to print (to the console) exactly what blocking
+methods your executor/client exposes - handy if a block ever fails to land.

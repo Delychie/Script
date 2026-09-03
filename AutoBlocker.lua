@@ -27,6 +27,11 @@ local BLOCK_DELAY     = 2.0    -- seconds to wait after joining (let players loa
 local HOP_DELAY       = 1.5    -- seconds to wait after blocking before hopping
 local MAX_BLOCKS      = 0      -- stop blocking after this many total blocks (0 = no limit); hopping continues
 
+-- If the silent block module can't be found on your client, fall back to the native
+-- block prompt (StarterGui SetCore "PromptBlockPlayer"). This always works but pops the
+-- game's block dialog you tap once. Set false to only ever block silently.
+local USE_PROMPT_FALLBACK = true
+
 local NOTIFY          = true   -- show Roblox toast notifications for what it's doing
 local STATE_FILE      = "dely_autoblocker.json" -- remembers visited servers + total block count (executor fs)
 
@@ -117,50 +122,122 @@ end
 
 --// ------------------------ blocking utility ------------------------
 
--- The BlockingUtility ModuleScript has lived at a few paths across Roblox versions,
--- so try the known ones and then fall back to a descendant search.
-local function getBlockingUtility()
-	local candidates = {
+-- Newer Roblox clients no longer keep a standalone "BlockingUtility" ModuleScript at a
+-- fixed path (that's why a fixed lookup fails), so we find the blocker by BEHAVIOUR
+-- across several strategies and cache whatever we get.
+local cachedBlocker = nil
+
+local function tryRequire(inst: Instance)
+	if not (inst and inst:IsA("ModuleScript")) then return nil end
+	local ok, mod = pcall(require, inst)
+	if ok and type(mod) == "table" then return mod end
+	return nil
+end
+
+local function hasBlockMethod(mod): boolean
+	return type(mod) == "table" and type(mod.BlockPlayerAsync) == "function"
+end
+
+local function findBlockModule()
+	if cachedBlocker then return cachedBlocker end
+
+	-- 1) Version-independent: scan every already-required module for one that exposes
+	--    BlockPlayerAsync. This survives Roblox moving/renaming the internal paths.
+	if type(getloadedmodules) == "function" then
+		local ok, mods = pcall(getloadedmodules)
+		if ok and type(mods) == "table" then
+			for _, m in ipairs(mods) do
+				local mod = tryRequire(m)
+				if hasBlockMethod(mod) then
+					cachedBlocker = mod
+					return mod
+				end
+			end
+		end
+	end
+
+	-- 2) Known standalone BlockingUtility ModuleScript locations.
+	local paths = {
 		{ "RobloxGui", "Modules", "PlayerList", "BlockingUtility" },
 		{ "RobloxGui", "Modules", "Common", "BlockingUtility" },
+		{ "RobloxGui", "Modules", "BlockingUtility" },
 		{ "RobloxGui", "Modules", "Settings", "Resources", "BlockingUtility" },
 	}
-	for _, path in ipairs(candidates) do
+	for _, path in ipairs(paths) do
 		local node: Instance? = CoreGui
 		for _, name in ipairs(path) do
 			node = node and node:FindFirstChild(name)
 		end
-		if node and node:IsA("ModuleScript") then
-			local ok, mod = pcall(require, node)
-			if ok and type(mod) == "table" then return mod end
+		local mod = node and tryRequire(node)
+		if hasBlockMethod(mod) then
+			cachedBlocker = mod
+			return mod
 		end
 	end
+
+	-- 3) A PlayerDropDown module that can *create* a blocking utility for us.
+	local rg = CoreGui:FindFirstChild("RobloxGui")
+	local modules = rg and rg:FindFirstChild("Modules")
+	if modules then
+		for _, name in ipairs({ "PlayerDropDown", "PlayerDropDownModule" }) do
+			local mod = tryRequire(modules:FindFirstChild(name))
+			if mod and type(mod.CreateBlockingUtility) == "function" then
+				local ok, bu = pcall(function() return mod:CreateBlockingUtility() end)
+				if ok and hasBlockMethod(bu) then
+					cachedBlocker = bu
+					return bu
+				end
+			end
+		end
+	end
+
+	-- 4) Last resort: descendant search for anything named BlockingUtility.
 	for _, d in ipairs(CoreGui:GetDescendants()) do
 		if d:IsA("ModuleScript") and d.Name == "BlockingUtility" then
-			local ok, mod = pcall(require, d)
-			if ok and type(mod) == "table" then return mod end
+			local mod = tryRequire(d)
+			if hasBlockMethod(mod) then
+				cachedBlocker = mod
+				return mod
+			end
 		end
 	end
+
 	return nil
 end
 
 local function isAlreadyBlocked(blockUtil, userId: number): boolean
 	local blocked = false
 	pcall(function()
-		if type(blockUtil.IsPlayerBlockedByUserId) == "function" then
+		if blockUtil and type(blockUtil.IsPlayerBlockedByUserId) == "function" then
 			blocked = blockUtil:IsPlayerBlockedByUserId(userId) and true or false
 		end
 	end)
 	return blocked
 end
 
-local function doBlock(blockUtil, target: Player): boolean
-	-- Prefer the Player-instance signature; fall back to the userId one.
-	local ok = pcall(function() blockUtil:BlockPlayerAsync(target) end)
-	if not ok then
-		ok = pcall(function() blockUtil:BlockPlayerAsync(target.UserId) end)
+-- Native block prompt: always registered by the CoreScripts, works on any client, but
+-- shows the game's block dialog for a single tap. Used only when no silent module exists.
+local function promptBlock(target: Player): boolean
+	return (pcall(function()
+		StarterGui:SetCore("PromptBlockPlayer", target)
+	end)) and true or false
+end
+
+-- Returns "silent", "prompt", or nil.
+local function doBlock(target: Player): string?
+	local blockUtil = findBlockModule()
+	if blockUtil then
+		-- Prefer the Player-instance signature; fall back to the userId one.
+		local ok = pcall(function() blockUtil:BlockPlayerAsync(target) end)
+		if not ok then
+			ok = pcall(function() blockUtil:BlockPlayerAsync(target.UserId) end)
+		end
+		if ok then return "silent" end
 	end
-	return ok
+	if USE_PROMPT_FALLBACK and promptBlock(target) then
+		return "prompt"
+	end
+	return nil
 end
 
 --// ------------------------ friend check ------------------------
@@ -181,7 +258,8 @@ end
 
 --// ------------------------ pick + block ------------------------
 
-local function pickTarget(blockUtil): Player?
+local function pickTarget(): Player?
+	local blockUtil = findBlockModule() -- may be nil; only used to skip already-blocked players
 	local candidates = {}
 	for _, p in ipairs(Players:GetPlayers()) do
 		if p ~= LocalPlayer then
@@ -209,27 +287,53 @@ local function blockRandom(): boolean
 		return false
 	end
 
-	local blockUtil = getBlockingUtility()
-	if not blockUtil then
-		notify("Auto Blocker", "Couldn't find the block module (not an executor?).")
-		return false
-	end
-
-	local target = pickTarget(blockUtil)
+	local target = pickTarget()
 	if not target then
 		notify("Auto Blocker", "No blockable non-friend here - skipping.")
 		return false
 	end
 
-	if doBlock(blockUtil, target) then
+	local method = doBlock(target)
+	if method == "silent" then
 		state.blocks += 1
 		saveState()
 		notify("Auto Blocker", ("Blocked %s  (total %d)"):format(target.Name, state.blocks))
 		return true
+	elseif method == "prompt" then
+		-- The native dialog is up; count it optimistically so hopping still progresses.
+		state.blocks += 1
+		saveState()
+		notify("Auto Blocker", ("Tap Block to block %s"):format(target.Name), 6)
+		return true
 	end
 
-	notify("Auto Blocker", ("Failed to block %s."):format(target.Name))
+	notify("Auto Blocker", ("Couldn't block %s (no block method on this client)."):format(target.Name), 6)
 	return false
+end
+
+-- Prints what's available on this client so you can tell what the executor supports.
+local function debugReport()
+	local function line(s) print("[AutoBlocker] " .. s) end
+	line("---- diagnostics ----")
+	line("getloadedmodules: " .. tostring(type(getloadedmodules) == "function"))
+	if type(getloadedmodules) == "function" then
+		local ok, mods = pcall(getloadedmodules)
+		local total, withBlock = 0, 0
+		if ok and type(mods) == "table" then
+			for _, m in ipairs(mods) do
+				total += 1
+				if hasBlockMethod(tryRequire(m)) then withBlock += 1 end
+			end
+		end
+		line(("loaded modules: %d  (with BlockPlayerAsync: %d)"):format(total, withBlock))
+	end
+	local rg = CoreGui:FindFirstChild("RobloxGui")
+	line("RobloxGui present: " .. tostring(rg ~= nil))
+	line("RobloxGui.Modules present: " .. tostring(rg and rg:FindFirstChild("Modules") ~= nil))
+	line("silent block module found: " .. tostring(findBlockModule() ~= nil))
+	line("prompt fallback enabled: " .. tostring(USE_PROMPT_FALLBACK))
+	line("total blocks recorded: " .. tostring(state.blocks))
+	line("---------------------")
 end
 
 --// ------------------------ server hop ------------------------
@@ -328,6 +432,7 @@ _G.AutoBlocker = {
 			serverHop()
 		end)
 	end,
+	debug = debugReport,
 	state = state,
 }
 
