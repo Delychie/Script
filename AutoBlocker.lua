@@ -30,10 +30,12 @@ local MAX_BLOCKS      = 0      -- stop blocking after this many total blocks (0 
 -- If the silent block module can't be found on your client, fall back to the native
 -- block prompt (StarterGui SetCore "PromptBlockPlayer"). This always works on any client.
 local USE_PROMPT_FALLBACK = true
--- When that native prompt is used, try to auto-confirm it AND hide the dialog, so the
--- block still happens with (as far as possible) no GUI and no tap. Best-effort: the
--- confirm button is fired via the executor's getconnections and the dialog is hidden.
+-- When that native prompt is used, auto-confirm it so the block still happens with no
+-- manual tap. It first tries firing the confirm button's handlers, then (the reliable
+-- path) sends a real mouse click on the button via VirtualInputManager, because the
+-- confirm handler is a CoreScript connection an executor usually can't fire directly.
 local AUTO_ACCEPT_PROMPT  = true
+local USE_VIRTUAL_CLICK   = true   -- allow the real-mouse-click confirm (needs VirtualInputManager)
 
 local NOTIFY          = true   -- show Roblox toast notifications for what it's doing
 local STATE_FILE      = "dely_autoblocker.json" -- remembers total block count (executor fs)
@@ -241,7 +243,15 @@ end
 
 local hasFireSignal = type((getgenv and getgenv().firesignal) or firesignal) == "function"
 local fireSignalFn = (getgenv and getgenv().firesignal) or firesignal
-local canAutoFire = (type(getconnections) == "function") or hasFireSignal
+local VirtualInputManager = nil
+pcall(function() VirtualInputManager = game:GetService("VirtualInputManager") end)
+if not VirtualInputManager then
+	pcall(function() VirtualInputManager = game:FindService("VirtualInputManager") end)
+end
+local GuiService = game:GetService("GuiService")
+local canVirtualClick = USE_VIRTUAL_CLICK and VirtualInputManager ~= nil
+local canFireHandlers = (type(getconnections) == "function") or hasFireSignal
+local canAutoAccept = canFireHandlers or canVirtualClick
 
 -- Fire a button's click handlers directly, no real cursor click needed. We do NOT hide
 -- anything: when the real handler runs it blocks AND closes its own dialog. Returns true
@@ -294,30 +304,69 @@ local function looksLikeConfirm(btn: Instance): boolean
 		or name == "primarybutton"
 end
 
--- After the native prompt fires, find its confirm button and fire it. We never force-hide
--- the dialog: if the fire works, Roblox closes it itself (block done, no tap); if it
--- doesn't, the dialog stays so you can tap it. Best-effort.
+-- The confirm button in the native block dialog, if it's currently on screen.
+local function findConfirmButton(): Instance?
+	for _, d in ipairs(CoreGui:GetDescendants()) do
+		if d:IsA("TextButton") or d:IsA("ImageButton") then
+			local visible = true
+			pcall(function() visible = (d :: any).Visible and (d :: any).AbsoluteSize.Y > 0 end)
+			if visible and looksLikeConfirm(d) then
+				return d
+			end
+		end
+	end
+	return nil
+end
+
+-- Send a real left-click at a GUI element's centre. The confirm handler is a CoreScript
+-- connection an executor can't fire directly, so we drive the genuine input path instead.
+local function virtualClick(btn: Instance, yOffset: number): boolean
+	if not VirtualInputManager then return false end
+	return (pcall(function()
+		local pos = (btn :: any).AbsolutePosition
+		local size = (btn :: any).AbsoluteSize
+		local x = pos.X + size.X / 2
+		local y = pos.Y + size.Y / 2 + yOffset
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+		task.wait(0.03)
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+	end))
+end
+
+-- After the native prompt fires, confirm it. Never force-hides: a successful confirm makes
+-- Roblox close its own dialog; if we can't confirm, the dialog stays so you can tap it.
 local function autoAcceptPrompt()
-	if not AUTO_ACCEPT_PROMPT or not canAutoFire then return end
+	if not AUTO_ACCEPT_PROMPT or not canAutoAccept then return end
 	task.spawn(function()
-		local deadline = os.clock() + 4
-		local firedOnce = false
-		while os.clock() < deadline do
-			for _, d in ipairs(CoreGui:GetDescendants()) do
-				if (d:IsA("TextButton") or d:IsA("ImageButton")) and looksLikeConfirm(d) then
-					local visible = true
-					pcall(function() visible = (d :: any).Visible end)
-					if visible and fireButton(d) then
-						firedOnce = true
-					end
-				end
+		-- Wait for the confirm button to actually appear.
+		local btn
+		local appear = os.clock() + 5
+		repeat
+			btn = findConfirmButton()
+			if btn then break end
+			task.wait(0.05)
+		until os.clock() > appear
+		if not btn then return end
+
+		-- 1) Try firing the handler connections (works on some executors).
+		if canFireHandlers then
+			fireButton(btn)
+			task.wait(0.3)
+			if not findConfirmButton() then return end
+		end
+
+		-- 2) Real mouse click. AbsolutePosition may or may not include the top-bar inset,
+		--    so try centre, then +inset, then -inset, stopping as soon as the dialog closes.
+		if canVirtualClick then
+			local inset = 36
+			pcall(function() inset = GuiService:GetGuiInset().Y end)
+			for _, yoff in ipairs({ 0, inset, -inset }) do
+				local target = findConfirmButton()
+				if not target then return end
+				virtualClick(target, yoff)
+				task.wait(0.35)
+				if not findConfirmButton() then return end
 			end
-			-- Give the handler a moment; if the prompt is gone the block went through.
-			if firedOnce then
-				task.wait(0.15)
-				return
-			end
-			task.wait(0.1)
 		end
 	end)
 end
@@ -414,7 +463,7 @@ local function blockRandom(): boolean
 		-- (blocked, no tap). Otherwise you'll see the dialog to tap once.
 		state.blocks += 1
 		saveState()
-		local canHide = AUTO_ACCEPT_PROMPT and canAutoFire
+		local canHide = AUTO_ACCEPT_PROMPT and canAutoAccept
 		notify("Auto Blocker", canHide
 			and ("Blocking %s..."):format(target.Name)
 			or ("Tap Block to block %s"):format(target.Name), 5)
@@ -454,7 +503,9 @@ function debugReport()
 	line("prompt fallback enabled: " .. tostring(USE_PROMPT_FALLBACK))
 	line("getconnections: " .. tostring(type(getconnections) == "function"))
 	line("firesignal: " .. tostring(hasFireSignal))
-	line("can auto-accept prompt: " .. tostring(canAutoFire))
+	line("VirtualInputManager: " .. tostring(VirtualInputManager ~= nil))
+	line("virtual-click enabled: " .. tostring(canVirtualClick))
+	line("can auto-accept prompt: " .. tostring(canAutoAccept))
 	line("total blocks recorded: " .. tostring(state.blocks))
 	line("---------------------")
 end

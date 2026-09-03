@@ -221,10 +221,13 @@ time you want to block someone (or drop it in your executor's auto-execute).
    descendant search. When that works the block is **silent - no GUI at all**.
 3. If no silent module exists on your client, it falls back to the native block prompt
    (`SetCore "PromptBlockPlayer"`) and then, with `AUTO_ACCEPT_PROMPT` on, **auto-confirms**
-   it by firing the confirm button's handlers (`getconnections`, else `firesignal`). When
-   that works Roblox closes its own dialog, so the block lands with no tap and the dialog
-   just flickers away - it is never force-hidden, so if the confirm can't be fired the
-   dialog stays for you to tap once (rather than vanishing without blocking).
+   it. The confirm handler in that dialog is a CoreScript connection an executor usually
+   can't fire directly, so after trying `getconnections`/`firesignal` it sends a **real
+   left-click** on the confirm button via `VirtualInputManager` (trying the button centre
+   with/without the top-bar inset). When it works Roblox closes its own dialog, so the
+   block lands with no tap. It is never force-hidden: if none of those confirm, the dialog
+   stays for you to tap once (rather than vanishing without blocking). Set
+   `USE_VIRTUAL_CLICK` off to disable the real-click path.
 
 On the prompt/failure paths it also prints a diagnostics block to the console (what
 block methods + `getconnections`/`firesignal` your client exposes) so it's clear why it
