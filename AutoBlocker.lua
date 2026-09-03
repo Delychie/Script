@@ -239,23 +239,37 @@ local function isAlreadyBlocked(blockUtil, userId: number): boolean
 	return blocked
 end
 
--- Fire a button's handlers directly (no real click needed, works while hidden) via the
--- executor's getconnections. Returns true if it fired anything.
+local hasFireSignal = type((getgenv and getgenv().firesignal) or firesignal) == "function"
+local fireSignalFn = (getgenv and getgenv().firesignal) or firesignal
+local canAutoFire = (type(getconnections) == "function") or hasFireSignal
+
+-- Fire a button's click handlers directly, no real cursor click needed. We do NOT hide
+-- anything: when the real handler runs it blocks AND closes its own dialog. Returns true
+-- if we managed to fire something.
 local function fireButton(btn: Instance): boolean
-	if type(getconnections) ~= "function" then return false end
 	local fired = false
 	local signals = {}
 	pcall(function() table.insert(signals, (btn :: any).Activated) end)
 	pcall(function() table.insert(signals, (btn :: any).MouseButton1Click) end)
 	pcall(function() table.insert(signals, (btn :: any).MouseButton1Down) end)
-	for _, sig in ipairs(signals) do
-		local ok, conns = pcall(getconnections, sig)
-		if ok and type(conns) == "table" then
-			for _, c in ipairs(conns) do
-				pcall(function() if c.Fire then c:Fire() end end)
-				pcall(function() if c.Function then task.spawn(c.Function) end end)
-				fired = true
+	pcall(function() table.insert(signals, (btn :: any).MouseButton1Up) end)
+
+	if type(getconnections) == "function" then
+		for _, sig in ipairs(signals) do
+			local ok, conns = pcall(getconnections, sig)
+			if ok and type(conns) == "table" then
+				for _, c in ipairs(conns) do
+					pcall(function() if c.Enabled == false and c.Enable then c:Enable() end end)
+					pcall(function() if c.Fire then c:Fire() end end)
+					pcall(function() if c.Function then task.spawn(c.Function) end end)
+					fired = true
+				end
 			end
+		end
+	end
+	if not fired and hasFireSignal then
+		for _, sig in ipairs(signals) do
+			if pcall(fireSignalFn, sig) then fired = true end
 		end
 	end
 	return fired
@@ -267,40 +281,43 @@ local function looksLikeConfirm(btn: Instance): boolean
 		return false
 	end
 	local text = ""
-	pcall(function() text = ((btn :: any).Text or ""):lower() end)
-	if text == "cancel" or text == "close" then return false end
+	pcall(function() text = tostring((btn :: any).Text or ""):lower() end)
+	if text:find("cancel") or text:find("close") or text:find("report") then return false end
 	return text == "block"
+		or text:find("block") ~= nil
 		or text == "confirm"
 		or text == "yes"
+		or text == "ok"
 		or name:find("confirm") ~= nil
 		or name:find("block") ~= nil
+		or name:find("accept") ~= nil
 		or name == "primarybutton"
 end
 
--- After the native prompt fires, find its confirm button, fire it, and hide the dialog,
--- so the block goes through with no visible GUI and no manual tap. Best-effort.
+-- After the native prompt fires, find its confirm button and fire it. We never force-hide
+-- the dialog: if the fire works, Roblox closes it itself (block done, no tap); if it
+-- doesn't, the dialog stays so you can tap it. Best-effort.
 local function autoAcceptPrompt()
-	if not AUTO_ACCEPT_PROMPT then return end
+	if not AUTO_ACCEPT_PROMPT or not canAutoFire then return end
 	task.spawn(function()
-		local deadline = os.clock() + 3
+		local deadline = os.clock() + 4
+		local firedOnce = false
 		while os.clock() < deadline do
 			for _, d in ipairs(CoreGui:GetDescendants()) do
 				if (d:IsA("TextButton") or d:IsA("ImageButton")) and looksLikeConfirm(d) then
 					local visible = true
 					pcall(function() visible = (d :: any).Visible end)
-					if visible then
-						if fireButton(d) then
-							-- Hide whatever container the prompt lives in, as cleanup.
-							pcall(function()
-								local sg = d:FindFirstAncestorWhichIsA("ScreenGui")
-								if sg then sg.Enabled = false end
-							end)
-							return
-						end
+					if visible and fireButton(d) then
+						firedOnce = true
 					end
 				end
 			end
-			task.wait()
+			-- Give the handler a moment; if the prompt is gone the block went through.
+			if firedOnce then
+				task.wait(0.15)
+				return
+			end
+			task.wait(0.1)
 		end
 	end)
 end
@@ -372,6 +389,8 @@ local function pickTarget(): Player?
 	return nil
 end
 
+local debugReport: () -> () -- forward declaration; defined below
+
 local function blockRandom(): boolean
 	if MAX_BLOCKS > 0 and state.blocks >= MAX_BLOCKS then
 		notify("Auto Blocker", ("Block limit reached (%d). Skipping block."):format(MAX_BLOCKS))
@@ -391,23 +410,26 @@ local function blockRandom(): boolean
 		notify("Auto Blocker", ("Blocked %s  (total %d)"):format(target.Name, state.blocks))
 		return true
 	elseif method == "prompt" then
-		-- Native prompt path: auto-accept fires in the background and hides the dialog.
-		-- If AUTO_ACCEPT_PROMPT is off (or couldn't fire), you'll see the dialog to tap.
+		-- Native prompt path. If we can auto-fire the confirm, the dialog closes itself
+		-- (blocked, no tap). Otherwise you'll see the dialog to tap once.
 		state.blocks += 1
 		saveState()
-		local msg = AUTO_ACCEPT_PROMPT
+		local canHide = AUTO_ACCEPT_PROMPT and canAutoFire
+		notify("Auto Blocker", canHide
 			and ("Blocking %s..."):format(target.Name)
-			or ("Tap Block to block %s"):format(target.Name)
-		notify("Auto Blocker", msg, 5)
+			or ("Tap Block to block %s"):format(target.Name), 5)
+		-- Print what's available so we can see why it's on the prompt path.
+		pcall(debugReport)
 		return true
 	end
 
 	notify("Auto Blocker", ("Couldn't block %s (no block method on this client)."):format(target.Name), 6)
+	pcall(debugReport)
 	return false
 end
 
 -- Prints what's available on this client so you can tell what the executor supports.
-local function debugReport()
+function debugReport()
 	local function line(s) print("[AutoBlocker] " .. s) end
 	line("---- diagnostics ----")
 	line("getloadedmodules: " .. tostring(type(getloadedmodules) == "function"))
@@ -430,6 +452,9 @@ local function debugReport()
 	line("RobloxGui.Modules present: " .. tostring(rg and rg:FindFirstChild("Modules") ~= nil))
 	line("silent block module found: " .. tostring(findBlockModule() ~= nil))
 	line("prompt fallback enabled: " .. tostring(USE_PROMPT_FALLBACK))
+	line("getconnections: " .. tostring(type(getconnections) == "function"))
+	line("firesignal: " .. tostring(hasFireSignal))
+	line("can auto-accept prompt: " .. tostring(canAutoFire))
 	line("total blocks recorded: " .. tostring(state.blocks))
 	line("---------------------")
 end

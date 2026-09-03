@@ -220,10 +220,15 @@ time you want to block someone (or drop it in your executor's auto-execute).
    `BlockingUtility` paths, then a `PlayerDropDown:CreateBlockingUtility()`, then a
    descendant search. When that works the block is **silent - no GUI at all**.
 3. If no silent module exists on your client, it falls back to the native block prompt
-   (`SetCore "PromptBlockPlayer"`) and then, with `AUTO_ACCEPT_PROMPT` on, **auto-confirms
-   and hides that dialog** for you (fires the confirm button via `getconnections`, then
-   disables the dialog's `ScreenGui`). Best-effort - if it can't fire the button you'll
-   see the dialog to tap once.
+   (`SetCore "PromptBlockPlayer"`) and then, with `AUTO_ACCEPT_PROMPT` on, **auto-confirms**
+   it by firing the confirm button's handlers (`getconnections`, else `firesignal`). When
+   that works Roblox closes its own dialog, so the block lands with no tap and the dialog
+   just flickers away - it is never force-hidden, so if the confirm can't be fired the
+   dialog stays for you to tap once (rather than vanishing without blocking).
+
+On the prompt/failure paths it also prints a diagnostics block to the console (what
+block methods + `getconnections`/`firesignal` your client exposes) so it's clear why it
+took that path.
 
 ## Config (top of the file)
 
