@@ -135,7 +135,15 @@ local function tryRequire(inst: Instance)
 end
 
 local function hasBlockMethod(mod): boolean
-	return type(mod) == "table" and type(mod.BlockPlayerAsync) == "function"
+	if type(mod) ~= "table" then return false end
+	-- rawget never triggers a metatable __index, so modules whose __index THROWS on an
+	-- unknown key (e.g. CameraShakePresets) can't blow up the scan. Covers the common
+	-- case where BlockPlayerAsync is a direct key on the returned table.
+	local ok, fn = pcall(rawget, mod, "BlockPlayerAsync")
+	if ok and type(fn) == "function" then return true end
+	-- Guarded normal index too, for modules that expose methods via __index (OOP).
+	ok, fn = pcall(function() return mod.BlockPlayerAsync end)
+	return ok and type(fn) == "function"
 end
 
 local function findBlockModule()
