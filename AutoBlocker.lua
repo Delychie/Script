@@ -146,19 +146,34 @@ local function hasBlockMethod(mod): boolean
 	return ok and type(fn) == "function"
 end
 
+-- The block module only ever lives in Roblox's own containers, never in game code.
+-- Restricting the scan to these keeps us from requiring/indexing game modules (which
+-- may throw from their __index, e.g. a GUI accessor or CameraShakePresets).
+local corePackages = game:FindService("CorePackages")
+local function isCoreModule(m: Instance): boolean
+	if not (m and m:IsA("ModuleScript")) then return false end
+	local ok, inCore = pcall(function()
+		return m:IsDescendantOf(CoreGui) or (corePackages ~= nil and m:IsDescendantOf(corePackages))
+	end)
+	return ok and inCore
+end
+
 local function findBlockModule()
 	if cachedBlocker then return cachedBlocker end
 
-	-- 1) Version-independent: scan every already-required module for one that exposes
-	--    BlockPlayerAsync. This survives Roblox moving/renaming the internal paths.
+	-- 1) Version-independent: scan Roblox's OWN loaded modules for one that exposes
+	--    BlockPlayerAsync. This survives Roblox moving/renaming the internal paths,
+	--    and skips game code so a game module's throwing __index can't break us.
 	if type(getloadedmodules) == "function" then
 		local ok, mods = pcall(getloadedmodules)
 		if ok and type(mods) == "table" then
 			for _, m in ipairs(mods) do
-				local mod = tryRequire(m)
-				if hasBlockMethod(mod) then
-					cachedBlocker = mod
-					return mod
+				if isCoreModule(m) then
+					local mod = tryRequire(m)
+					if hasBlockMethod(mod) then
+						cachedBlocker = mod
+						return mod
+					end
 				end
 			end
 		end
@@ -326,14 +341,17 @@ local function debugReport()
 	line("getloadedmodules: " .. tostring(type(getloadedmodules) == "function"))
 	if type(getloadedmodules) == "function" then
 		local ok, mods = pcall(getloadedmodules)
-		local total, withBlock = 0, 0
+		local total, core, withBlock = 0, 0, 0
 		if ok and type(mods) == "table" then
 			for _, m in ipairs(mods) do
 				total += 1
-				if hasBlockMethod(tryRequire(m)) then withBlock += 1 end
+				if isCoreModule(m) then
+					core += 1
+					if hasBlockMethod(tryRequire(m)) then withBlock += 1 end
+				end
 			end
 		end
-		line(("loaded modules: %d  (with BlockPlayerAsync: %d)"):format(total, withBlock))
+		line(("loaded modules: %d  (core: %d, with BlockPlayerAsync: %d)"):format(total, core, withBlock))
 	end
 	local rg = CoreGui:FindFirstChild("RobloxGui")
 	line("RobloxGui present: " .. tostring(rg ~= nil))

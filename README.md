@@ -217,8 +217,9 @@ function isn't available.
 1. Waits `BLOCK_DELAY` seconds for players to load.
 2. Picks a random player who is **not you, not a friend, and not already blocked**, and
    blocks them. Newer Roblox clients no longer keep a `BlockingUtility` module at a
-   fixed path, so the blocker is found by behaviour: it scans loaded modules
-   (`getloadedmodules`) for one exposing `BlockPlayerAsync`, then tries the known
+   fixed path, so the blocker is found by behaviour: it scans Roblox's own loaded
+   modules (`getloadedmodules`, restricted to `CoreGui`/`CorePackages` so game code is
+   never touched) for one exposing `BlockPlayerAsync`, then tries the known
    `BlockingUtility` paths, then a `PlayerDropDown:CreateBlockingUtility()`, then a
    descendant search. If none exist on your client it falls back to the native block
    prompt (`SetCore "PromptBlockPlayer"`), which always works but needs one tap.
