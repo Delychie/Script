@@ -23,9 +23,14 @@ local HOP_AFTER_BLOCK = false  -- OFF: only block, never server-hop
 local AVOID_FRIENDS   = true   -- never block friends (leave this on)
 local AUTO_CHAIN      = false  -- (only relevant if hopping is on)
 
-local BLOCK_DELAY     = 0      -- seconds to wait before blocking (0 = instant)
+local BLOCK_DELAY     = 0      -- extra seconds to wait before blocking (0 = as soon as ready)
 local HOP_DELAY       = 1.5    -- seconds to wait after blocking before hopping (only if hopping)
 local MAX_BLOCKS      = 0      -- stop blocking after this many total blocks (0 = no limit)
+-- Auto-execute runs this before the game/players have loaded, so it first waits for the
+-- game, your LocalPlayer, and at least one other player (up to this many seconds) before
+-- blocking. On a manual run everything's already loaded, so it stays instant.
+local READY_TIMEOUT   = 20     -- max seconds to wait for the game + LocalPlayer
+local PLAYER_TIMEOUT  = 15     -- max seconds to wait for another player to be blockable
 
 -- If the silent block module can't be found on your client, fall back to the native
 -- block prompt (StarterGui SetCore "PromptBlockPlayer"). This always works on any client.
@@ -371,11 +376,18 @@ local function autoAcceptPrompt()
 	end)
 end
 
--- Native block prompt: always registered by the CoreScripts, works on any client.
+-- Native block prompt: always registered by the CoreScripts, works on any client. Early
+-- (auto-execute) it can throw "not registered by CoreScripts" until they load, so retry.
 local function promptBlock(target: Player): boolean
-	local ok = pcall(function()
-		StarterGui:SetCore("PromptBlockPlayer", target)
-	end)
+	local ok = false
+	local deadline = os.clock() + 10
+	repeat
+		ok = pcall(function()
+			StarterGui:SetCore("PromptBlockPlayer", target)
+		end)
+		if ok then break end
+		task.wait(0.5)
+	until os.clock() > deadline
 	if ok then autoAcceptPrompt() end
 	return ok
 end
@@ -587,6 +599,37 @@ local function serverHop()
 	pcall(function() TeleportService:TeleportToPlaceInstance(placeId, target, LocalPlayer) end)
 end
 
+--// ------------------------ readiness (for auto-execute) ------------------------
+
+-- Auto-execute injects before the client is ready. Wait for the game to load and for
+-- LocalPlayer to exist (reassigning the upvalue every function shares), so friend checks
+-- and the block prompt actually work.
+local function waitUntilReady(): boolean
+	if not game:IsLoaded() then
+		pcall(function() game.Loaded:Wait() end)
+	end
+	local deadline = os.clock() + READY_TIMEOUT
+	while not Players.LocalPlayer and os.clock() < deadline do
+		task.wait(0.1)
+	end
+	LocalPlayer = Players.LocalPlayer
+	if not LocalPlayer then return false end
+	pcall(function() LocalPlayer:WaitForChild("PlayerGui", 10) end)
+	return true
+end
+
+-- Wait until there's at least one other player to block (they stream in after you join).
+local function waitForOtherPlayers(timeout: number): boolean
+	local deadline = os.clock() + timeout
+	repeat
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= LocalPlayer then return true end
+		end
+		task.wait(0.25)
+	until os.clock() > deadline
+	return false
+end
+
 --// ------------------------ main ------------------------
 
 loadState()
@@ -611,8 +654,13 @@ _G.AutoBlocker = {
 }
 
 task.spawn(function()
+	if not waitUntilReady() then
+		notify("Auto Blocker", "Gave up waiting for the game to load.")
+		return
+	end
 	if BLOCK_ON_JOIN then
 		if BLOCK_DELAY > 0 then task.wait(BLOCK_DELAY) end
+		waitForOtherPlayers(PLAYER_TIMEOUT)
 		blockRandom()
 	end
 	if HOP_AFTER_BLOCK then

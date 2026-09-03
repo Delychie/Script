@@ -207,7 +207,11 @@ Nothing targets a specific person; the pick is random.
 ## Install
 
 Run `AutoBlocker.lua` from a client-side script runner (executor). Run it again each
-time you want to block someone (or drop it in your executor's auto-execute).
+time you want to block someone, or **drop it in your executor's auto-execute** to block
+on every join. Auto-execute fires before the game is ready, so the script waits for the
+game to load, for your `LocalPlayer`, and for at least one other player to stream in
+(`READY_TIMEOUT` / `PLAYER_TIMEOUT`) before it blocks - on a manual run everything's
+already loaded so it's instant.
 
 ## What it does
 
