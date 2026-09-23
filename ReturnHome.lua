@@ -13,6 +13,7 @@ local ARRIVE = 2.5   -- stop within this many studs of home (flat distance)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
 
 local player = Players.LocalPlayer
 
@@ -28,6 +29,16 @@ local mover: LinearVelocity? = nil
 local returning = false
 local home: Vector3? = HOME
 local stuckTime = 0
+
+local function notify(text: string)
+	pcall(function()
+		StarterGui:SetCore("SendNotification", { Title = "Return Home", Text = text, Duration = 3 })
+	end)
+end
+
+local function speedLabel(): string
+	return SPEED > 0 and (tostring(SPEED) .. " studs/s") or "your WalkSpeed"
+end
 
 local function stop()
 	returning = false
@@ -93,6 +104,7 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	local flat = Vector3.new(home.X - pos.X, 0, home.Z - pos.Z)
 	if flat.Magnitude < ARRIVE then
 		stop()
+		notify("Home")
 		return
 	end
 
@@ -125,9 +137,11 @@ table.insert(connections, UserInputService.InputBegan:Connect(function(input, ga
 	if gameProcessed or input.KeyCode ~= KEY then return end
 	if returning then
 		stop()
+		notify("Cancelled")
 	elseif home and mover then
 		returning = true
 		stuckTime = 0
+		notify("Going home at " .. speedLabel())
 	end
 end))
 
@@ -147,3 +161,5 @@ _G.__ReturnHomeCleanup = function()
 	stop()
 	teardown()
 end
+
+notify("Loaded - V goes home at " .. speedLabel())
