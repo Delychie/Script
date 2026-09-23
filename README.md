@@ -262,3 +262,41 @@ While it's loaded, `_G.AutoBlocker` exposes `blockNow()`, `hop()`, `blockAndHop(
 `debug()`. Run `_G.AutoBlocker.blockNow()` to block another random person on demand, or
 `_G.AutoBlocker.debug()` to print (to the console) exactly what blocking methods your
 executor/client exposes - handy if a block ever fails to land.
+
+---
+
+# Auto Steal (Steal An Egg)
+
+`AutoSteal.lua` is a small auto-steal loop for **Steal An Egg**. Each cycle it:
+
+1. Asks `RF/EggWorld/AskFieldEggSnapshot` for the wild field eggs and picks the best one
+   (highest mutation tier, then `NestScale`; set `PICK_BY = "size"` for biggest only).
+2. **Hop-trains** to it - teleports in ~30-stud steps at a locked height so no single jump
+   is big enough to trip the server's displacement/teleport kick.
+3. Fires the nearby `CarryAreaEgg` ProximityPrompt (`fireproximityprompt`) to grab it.
+4. Hop-trains back to your bank spot and `UnequipTools()` so the egg banks, then repeats.
+
+Grab-via-prompt and the hop-train are the proven primitives from your own recovered flow
+(`steal_run` / `steal_target`) - it calls the game's remotes/prompts only, no game code.
+
+## Install / use
+
+Run `AutoSteal.lua` from an executor **while standing at your pen** - it captures your bank
+spot and travel height at start. It auto-starts; control it with:
+
+- `_G.AutoSteal.stop()` / `_G.AutoSteal.start()` / `_G.AutoSteal.toggle()`
+
+## Config (top of the file)
+
+- `AUTO_START` - begin on load (default on).
+- `HOP` - studs per micro-hop (smaller = safer vs anti-cheat).
+- `FLY_Y` / `HOME` - lock the travel height / bank spot to fixed values (else captured at
+  start from where you're standing).
+- `PICK_BY` - `"mutation"` (tier then size) or `"size"`.
+- `GRAB_RANGE` / `APPROACH_OFF` / `HOLD` / `GRAB_WAIT` / `BANK_WAIT` / `LOOP_DELAY` -
+  reach, drop-in offset, and the timings around each grab.
+
+Note: the **grab** is the reliable part. Banking relies on returning to your pen and
+unequipping (the confirmed drop path); an exact server-side "place" call was never nailed
+down, so if a grabbed egg doesn't bank, tune `HOME`/`BANK_WAIT` or drop it at the pen
+manually.
