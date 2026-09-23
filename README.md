@@ -300,3 +300,15 @@ Note: the **grab** is the reliable part. Banking relies on returning to your pen
 unequipping (the confirmed drop path); an exact server-side "place" call was never nailed
 down, so if a grabbed egg doesn't bank, tune `HOME`/`BANK_WAIT` or drop it at the pen
 manually.
+
+## GUI version
+
+`AutoStealUI.lua` is the same loop with a **tiny on/off button** (draggable), a **Field /
+Pen** target switch, and it wires a matching toggle into your **SAE Hub** if that hub is
+open. It does not auto-start - the button does - so run *either* `AutoStealUI.lua` *or*
+`AutoSteal.lua`, not both.
+
+- **Field** mode targets the best wild egg (snapshot); **Pen** mode goes for the nearest
+  `CarryAreaEgg` prompt away from your base (`HOME_RADIUS`) to steal from pens.
+- Controls: `_G.AutoStealUI.start()` / `stop()` / `toggle()` / `cycleMode()`.
+- Stand at your pen when you first turn it on (it captures your bank spot + height there).
