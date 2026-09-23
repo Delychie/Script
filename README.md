@@ -331,4 +331,4 @@ walkspeed, steering straight at home and stopping within `ARRIVE` studs. If a le
 wall stalls it, it jumps. It pauses while you're ragdolled or knocked.
 
 Run it **while standing at your base** - that spot becomes home (or set `HOME`).
-`SPEED = 800` by default; set it to `0` to follow your `Humanoid.WalkSpeed` instead.
+`SPEED = 600` by default; set it to `0` to follow your `Humanoid.WalkSpeed` instead.

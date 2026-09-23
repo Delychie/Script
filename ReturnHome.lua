@@ -6,7 +6,7 @@
 -- Home is where you're standing when you run this, so run it at your base (or set HOME).
 
 local KEY    = Enum.KeyCode.V
-local SPEED  = 800   -- studs/s; 0 = use your Humanoid.WalkSpeed
+local SPEED  = 600   -- studs/s; 0 = use your Humanoid.WalkSpeed
 local HOME   = nil   -- Vector3; nil = your position when the script runs
 local ARRIVE = 2.5   -- stop within this many studs of home (flat distance)
 
