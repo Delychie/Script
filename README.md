@@ -324,11 +324,12 @@ open. It does not auto-start - the button does - so run *either* `AutoStealUI.lu
 
 # Return Home (V)
 
-`ReturnHome.lua` does one thing: press **V** to walk back to your base, press **V** again
-to cancel. It moves you with the same `LinearVelocity` plane mover as SpeedBooster's
-Auto Left/Right (world XZ plane, no teleport, no `AssemblyLinearVelocity` writes) at your
-walkspeed, steering straight at home and stopping within `ARRIVE` studs. If a ledge or
-wall stalls it, it jumps. It pauses while you're ragdolled or knocked.
+`ReturnHome.lua` does one thing: press **V** to go back to your base, press **V** again to
+cancel. It uses the bundle's hop-train (`steal_run.luau` `hopTo`): it teleports you `HOP`
+(30) studs every `STEP_WAIT` (0.05s) - about 600 studs/s - at a locked height, then lands
+you on home. There's no velocity mover, so it doesn't rubber-band the way a 600-stud/s
+push does.
 
-Run it **while standing at your base** - that spot becomes home (or set `HOME`).
-`SPEED = 600` by default; set it to `0` to follow your `Humanoid.WalkSpeed` instead.
+Run it **while standing at your base** - that spot becomes home (or set `HOME`). The
+travel height defaults to home's height (the bundle used a fixed 70.5); set `FLY_Y` to
+override. Lower `HOP` or raise `STEP_WAIT` if you still get pulled back.
