@@ -6,7 +6,7 @@
 -- Home is where you're standing when you run this, so run it at your base (or set HOME).
 
 local KEY    = Enum.KeyCode.V
-local SPEED  = 0     -- studs/s; 0 = use your Humanoid.WalkSpeed
+local SPEED  = 800   -- studs/s; 0 = use your Humanoid.WalkSpeed
 local HOME   = nil   -- Vector3; nil = your position when the script runs
 local ARRIVE = 2.5   -- stop within this many studs of home (flat distance)
 
@@ -97,6 +97,8 @@ table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 	end
 
 	local spd = SPEED > 0 and SPEED or hum.WalkSpeed
+	-- Ease off near home so a high speed doesn't overshoot and jitter around it.
+	spd = math.min(spd, flat.Magnitude * 10)
 	if spd <= 0 then
 		lv.Enabled = false
 		return
