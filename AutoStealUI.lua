@@ -1,27 +1,27 @@
 --!nonstrict
 
--- AutoStealUI: the auto-steal loop for "Steal An Egg" with a tiny on/off GUI, plus a
--- Field/Pen target switch. It also wires itself into your SAE Hub if that hub is open.
+-- AutoStealUI: the auto-steal loop for "Steal An Egg" with a tiny on/off GUI, a Pen/Field
+-- target switch, and a toggle wired into your SAE Hub if it's open.
 --
--- This is a self-contained companion to AutoSteal.lua (same proven flow: hop-train to a
--- target, fire the CarryAreaEgg prompt to grab, return to your bank spot and unequip).
--- Run EITHER this or AutoSteal.lua, not both. Nothing here is auto-started; the button is.
+-- The steal is a CarryAreaEgg ProximityPrompt on a pen: the server handles its Triggered
+-- event and requires you within ~8 studs. So each cycle goes to the prompt, teleports ONTO
+-- it (3D) so the distance check passes, fires it to grab, then returns home and unequips
+-- so the egg banks. Same flow as AutoSteal.lua - run EITHER this or that, not both.
 --
 -- Modes:
---   Field - pick the best wild field egg (RF/EggWorld/AskFieldEggSnapshot).
---   Pen   - go for the nearest CarryAreaEgg prompt away from your own base (steal from pens).
+--   Pen   - nearest steal prompt away from your own base (the proven grab).
+--   Field - the steal prompt nearest the best wild field egg (falls back to Pen).
 
 --// ============================== CONFIG ==============================
-local START_MODE   = "Field" -- "Field" or "Pen"
+local START_MODE   = "Pen"   -- "Pen" or "Field"
 local HOP          = 30      -- studs per micro-hop (smaller = safer vs anti-cheat)
-local FLY_Y        = nil     -- locked travel height; nil = your height when you start
 local HOME         = nil     -- Vector3 bank spot; nil = your position when you start
-local PICK_BY      = "mutation" -- Field mode: "mutation" (tier, then size) or "size"
-local GRAB_RANGE   = 8       -- how close a CarryAreaEgg prompt must be to fire (studs)
-local APPROACH_OFF = 40      -- drop-in offset behind the target before the last hop
-local HOME_RADIUS  = 60      -- Pen mode: ignore prompts within this many studs of home (yours)
-local HOLD         = 0.3     -- pause between the two prompt fires
-local GRAB_WAIT    = 2.5     -- seconds to let the grab register
+local HOME_RADIUS  = 60      -- ignore steal prompts within this many studs of home (yours)
+local FIELD_RANGE  = 60      -- Field mode: max distance a prompt may be from the target egg
+local GRAB_OFFSET  = 4       -- studs above the prompt to sit while firing
+local FIRES        = 2       -- how many times to fire the prompt per grab
+local HOLD         = 0.4     -- pause between fires
+local GRAB_WAIT    = 1.5     -- seconds to let the grab register before banking
 local BANK_WAIT    = 2       -- seconds at home for the drop/bank to register
 local LOOP_DELAY   = 1       -- seconds between steals
 local NOTIFY       = true    -- Roblox toast notifications
@@ -36,7 +36,7 @@ local LocalPlayer = Players.LocalPlayer
 
 if _G.__AutoStealUICleanup then pcall(_G.__AutoStealUICleanup) end
 
-local S = { on = false, mode = START_MODE, home = nil, flyY = nil }
+local S = { on = false, mode = START_MODE, home = nil }
 local indicators: { (boolean, string) -> () } = {}
 
 --// ------------------------------ helpers ------------------------------
@@ -73,6 +73,26 @@ local function refresh()
 	for _, f in ipairs(indicators) do pcall(f, S.on, S.mode) end
 end
 
+local function promptPos(pr: Instance): Vector3?
+	local par = pr.Parent
+	if not par then return nil end
+	if par:IsA("BasePart") then return par.Position end
+	if par:IsA("Attachment") then return par.WorldPosition end
+	local bp = (par:IsA("Model") and par.PrimaryPart) or par:FindFirstChildWhichIsA("BasePart")
+	return bp and bp.Position or nil
+end
+
+local function collectPrompts()
+	local out = {}
+	for _, pr in ipairs(workspace:GetDescendants()) do
+		if pr:IsA("ProximityPrompt") and pr.Name == "CarryAreaEgg" and pr.Enabled then
+			local pos = promptPos(pr)
+			if pos then out[#out + 1] = { prompt = pr, pos = pos } end
+		end
+	end
+	return out
+end
+
 --// ------------------------------ targeting ------------------------------
 
 local function tier(m): number
@@ -82,7 +102,6 @@ local function tier(m): number
 	return 0
 end
 
--- Field mode: best wild egg's world position.
 local function bestFieldPos(): Vector3?
 	local remote = rf("RF/EggWorld/AskFieldEggSnapshot")
 	if not remote then return nil end
@@ -90,29 +109,37 @@ local function bestFieldPos(): Vector3?
 	if not ok or type(snap) ~= "table" or type(snap.Records) ~= "table" then return nil end
 	local best, bestScore = nil, -1
 	for _, e in pairs(snap.Records) do
-		local size = tonumber(e.NestScale) or 0
-		local score = (PICK_BY == "size") and size or (tier(e.BaseMutation) * 1e12 + size * 1e6)
+		local score = tier(e.BaseMutation) * 1e12 + (tonumber(e.NestScale) or 0) * 1e6
 		if score > bestScore then bestScore, best = score, e end
 	end
-	if not best then return nil end
-	local cf = best.BoundsCFrame or best.BottomCFrame
+	local cf = best and (best.BoundsCFrame or best.BottomCFrame)
 	return cf and cf.Position or nil
 end
 
--- Pen mode: nearest CarryAreaEgg prompt away from your own base.
-local function nearestPenPos(): Vector3?
+local function pickTarget()
 	local root = hrp()
 	if not root then return nil end
 	local me = root.Position
-	local best, bestDist = nil, math.huge
-	for _, pr in ipairs(workspace:GetDescendants()) do
-		if pr:IsA("ProximityPrompt") and pr.Name == "CarryAreaEgg" and pr.Enabled then
-			local part = pr.Parent
-			local ppos = part and part:IsA("BasePart") and part.Position
-			if ppos and (ppos - S.home).Magnitude > HOME_RADIUS then
-				local d = (ppos - me).Magnitude
-				if d < bestDist then bestDist, best = d, ppos end
+	local prompts = collectPrompts()
+	if #prompts == 0 then return nil end
+
+	if S.mode == "Field" then
+		local egg = bestFieldPos()
+		if egg then
+			local best, bd = nil, FIELD_RANGE
+			for _, c in ipairs(prompts) do
+				local d = (c.pos - egg).Magnitude
+				if d < bd then bd, best = d, c end
 			end
+			if best then return best end
+		end
+	end
+
+	local best, bd = nil, math.huge
+	for _, c in ipairs(prompts) do
+		if (c.pos - S.home).Magnitude > HOME_RADIUS then
+			local d = (c.pos - me).Magnitude
+			if d < bd then bd, best = d, c end
 		end
 	end
 	return best
@@ -123,52 +150,50 @@ end
 local function hopTo(dest: Vector3)
 	local root = hrp()
 	if not root then return end
-	local p = root.Position
-	local flat = Vector3.new(dest.X - p.X, 0, dest.Z - p.Z)
-	local steps = math.max(1, math.floor(flat.Magnitude / HOP))
+	local start = root.Position
+	local delta = dest - start
+	local steps = math.max(1, math.floor(delta.Magnitude / HOP))
 	for i = 1, steps do
 		if not S.on then return end
-		local t = i / steps
-		tp(Vector3.new(p.X + flat.X * t, S.flyY, p.Z + flat.Z * t))
+		tp(start + delta * (i / steps))
 		task.wait(0.05)
 	end
-	tp(Vector3.new(dest.X, S.flyY, dest.Z))
+	tp(dest)
 end
 
-local function fireNear(pos: Vector3): boolean
+local function grab(c): boolean
+	hopTo(c.pos + Vector3.new(0, GRAB_OFFSET, 0))
+	if not S.on then return false end
+	tp(c.pos + Vector3.new(0, GRAB_OFFSET, 0))
+	task.wait(0.25)
 	local fired = false
-	for _, pr in ipairs(workspace:GetDescendants()) do
-		if pr:IsA("ProximityPrompt") and pr.Name == "CarryAreaEgg" and pr.Enabled then
-			local part = pr.Parent
-			local ppos = part and part:IsA("BasePart") and part.Position
-			if ppos and (ppos - pos).Magnitude < GRAB_RANGE then
-				pcall(function() fireproximityprompt(pr) end)
-				task.wait(HOLD)
-				pcall(function() fireproximityprompt(pr) end)
-				fired = true
-			end
-		end
+	for _ = 1, FIRES do
+		if not S.on then break end
+		pcall(function() fireproximityprompt(c.prompt) end)
+		fired = true
+		task.wait(HOLD)
 	end
 	return fired
 end
 
-local function cycle(): boolean
-	local target = (S.mode == "Pen") and nearestPenPos() or bestFieldPos()
-	if not target then
-		notify("No " .. S.mode:lower() .. " target found.")
-		return false
-	end
-	tp(Vector3.new(target.X, S.flyY, target.Z + APPROACH_OFF))
-	hopTo(target)
-	local grabbed = fireNear(target)
-	task.wait(GRAB_WAIT)
-	if not S.on then return grabbed end
+local function bankHome()
 	hopTo(S.home)
 	tp(S.home)
 	task.wait(1)
 	local hum = humanoid()
 	if hum then pcall(function() hum:UnequipTools() end) end
 	task.wait(BANK_WAIT)
+end
+
+local function cycle(): boolean
+	local target = pickTarget()
+	if not target then
+		notify("No steal prompt found.")
+		return false
+	end
+	local grabbed = grab(target)
+	task.wait(GRAB_WAIT)
+	if S.on then bankHome() end
 	return grabbed
 end
 
@@ -179,14 +204,13 @@ function S.start()
 	local root = hrp()
 	if not root then notify("No character yet - respawn and retry.") return end
 	S.home = HOME or root.Position
-	S.flyY = FLY_Y or root.Position.Y
 	S.on = true
 	refresh()
 	notify("Auto Steal ON (" .. S.mode .. ")")
 	task.spawn(function()
 		while S.on do
 			local ok, grabbed = pcall(cycle)
-			if ok and grabbed then notify("Stole an egg", 2) end
+			if ok and grabbed then notify("Grabbed", 2) end
 			task.wait(LOOP_DELAY)
 		end
 		refresh()
@@ -197,10 +221,10 @@ end
 function S.stop() S.on = false end
 function S.toggle() if S.on then S.stop() else S.start() end end
 function S.setMode(m)
-	S.mode = (m == "Pen") and "Pen" or "Field"
+	S.mode = (m == "Field") and "Field" or "Pen"
 	refresh()
 end
-function S.cycleMode() S.setMode(S.mode == "Field" and "Pen" or "Field") end
+function S.cycleMode() S.setMode(S.mode == "Pen" and "Field" or "Pen") end
 
 _G.AutoStealUI = S
 
@@ -231,7 +255,6 @@ toggle.TextColor3 = Color3.new(1, 1, 1)
 toggle.Font = Enum.Font.GothamBold
 toggle.TextSize = 14
 toggle.Text = "Auto Steal: OFF"
-toggle.AutoButtonColor = true
 Instance.new("UICorner", toggle).CornerRadius = UDim.new(0, 6)
 
 local modeBtn = Instance.new("TextButton", panel)
@@ -255,12 +278,10 @@ end)
 
 --// ------------------------------ SAE Hub wire-in ------------------------------
 
--- If your SAE Hub is open, drop a matching toggle into it too, sharing the same state.
 local function wireHub()
 	local hub = CoreGui:FindFirstChild("SAEHub")
 	local mainFrame = hub and hub:FindFirstChildWhichIsA("Frame")
-	if not mainFrame then return end
-	if mainFrame:FindFirstChild("AutoStealHubBtn") then return end
+	if not mainFrame or mainFrame:FindFirstChild("AutoStealHubBtn") then return end
 	local b = Instance.new("TextButton", mainFrame)
 	b.Name = "AutoStealHubBtn"
 	b.Size = UDim2.new(0, 100, 0, 26)
@@ -279,9 +300,14 @@ local function wireHub()
 	end)
 end
 pcall(wireHub)
+-- If the hub opens later, attach then too.
+local hubConn = CoreGui.ChildAdded:Connect(function(child)
+	if child.Name == "SAEHub" then task.wait(0.5) pcall(wireHub) refresh() end
+end)
 
 _G.__AutoStealUICleanup = function()
 	S.on = false
+	pcall(function() hubConn:Disconnect() end)
 	pcall(function() gui:Destroy() end)
 	local hub = CoreGui:FindFirstChild("SAEHub")
 	local mf = hub and hub:FindFirstChildWhichIsA("Frame")

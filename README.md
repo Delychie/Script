@@ -267,13 +267,18 @@ executor/client exposes - handy if a block ever fails to land.
 
 # Auto Steal (Steal An Egg)
 
-`AutoSteal.lua` is a small auto-steal loop for **Steal An Egg**. Each cycle it:
+`AutoSteal.lua` is a small auto-steal loop for **Steal An Egg**. The steal is a
+`CarryAreaEgg` ProximityPrompt (ActionText "Steal") on a pen - the server handles its
+`Triggered` event and requires you to be within ~8 studs. Each cycle it:
 
-1. Asks `RF/EggWorld/AskFieldEggSnapshot` for the wild field eggs and picks the best one
-   (highest mutation tier, then `NestScale`; set `PICK_BY = "size"` for biggest only).
-2. **Hop-trains** to it - teleports in ~30-stud steps at a locked height so no single jump
-   is big enough to trip the server's displacement/teleport kick.
-3. Fires the nearby `CarryAreaEgg` ProximityPrompt (`fireproximityprompt`) to grab it.
+1. Collects every enabled `CarryAreaEgg` prompt (reading its position whether it's
+   parented to a part, attachment or model) and picks a target:
+   - **Pen** (default): the nearest prompt away from your own base (`HOME_RADIUS`).
+   - **Field**: the prompt nearest the best wild egg from `AskFieldEggSnapshot`
+     (mutation tier, then `NestScale`); falls back to Pen if there's no field data.
+2. **Hop-trains** to it in full 3D - ~30-stud steps so no single jump trips the server's
+   displacement kick - and ends sitting right **on** the prompt, so the <8-stud check passes.
+3. Fires the prompt (`fireproximityprompt`) to grab.
 4. Hop-trains back to your bank spot and `UnequipTools()` so the egg banks, then repeats.
 
 Grab-via-prompt and the hop-train are the proven primitives from your own recovered flow
@@ -289,12 +294,13 @@ spot and travel height at start. It auto-starts; control it with:
 ## Config (top of the file)
 
 - `AUTO_START` - begin on load (default on).
+- `MODE` - `"Pen"` (default) or `"Field"`.
 - `HOP` - studs per micro-hop (smaller = safer vs anti-cheat).
-- `FLY_Y` / `HOME` - lock the travel height / bank spot to fixed values (else captured at
-  start from where you're standing).
-- `PICK_BY` - `"mutation"` (tier then size) or `"size"`.
-- `GRAB_RANGE` / `APPROACH_OFF` / `HOLD` / `GRAB_WAIT` / `BANK_WAIT` / `LOOP_DELAY` -
-  reach, drop-in offset, and the timings around each grab.
+- `HOME` / `HOME_RADIUS` - bank spot (else captured where you stand at start) and how
+  far around it prompts are treated as yours and skipped.
+- `FIELD_RANGE` - Field mode: how close a prompt must be to the chosen egg.
+- `GRAB_OFFSET` / `FIRES` / `HOLD` / `GRAB_WAIT` / `BANK_WAIT` / `LOOP_DELAY` - where
+  to sit over the prompt, how many fires, and the timings around each grab.
 
 Note: the **grab** is the reliable part. Banking relies on returning to your pen and
 unequipping (the confirmed drop path); an exact server-side "place" call was never nailed
@@ -308,7 +314,8 @@ Pen** target switch, and it wires a matching toggle into your **SAE Hub** if tha
 open. It does not auto-start - the button does - so run *either* `AutoStealUI.lua` *or*
 `AutoSteal.lua`, not both.
 
-- **Field** mode targets the best wild egg (snapshot); **Pen** mode goes for the nearest
-  `CarryAreaEgg` prompt away from your base (`HOME_RADIUS`) to steal from pens.
+- **Pen** mode (default) goes for the nearest `CarryAreaEgg` prompt away from your base
+  (`HOME_RADIUS`); **Field** mode picks the prompt nearest the best wild egg. The hub
+  toggle re-attaches if you open the SAE Hub after loading this.
 - Controls: `_G.AutoStealUI.start()` / `stop()` / `toggle()` / `cycleMode()`.
 - Stand at your pen when you first turn it on (it captures your bank spot + height there).
