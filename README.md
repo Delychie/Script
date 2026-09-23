@@ -319,3 +319,16 @@ open. It does not auto-start - the button does - so run *either* `AutoStealUI.lu
   toggle re-attaches if you open the SAE Hub after loading this.
 - Controls: `_G.AutoStealUI.start()` / `stop()` / `toggle()` / `cycleMode()`.
 - Stand at your pen when you first turn it on (it captures your bank spot + height there).
+
+---
+
+# Return Home (V)
+
+`ReturnHome.lua` does one thing: press **V** to walk back to your base, press **V** again
+to cancel. It moves you with the same `LinearVelocity` plane mover as SpeedBooster's
+Auto Left/Right (world XZ plane, no teleport, no `AssemblyLinearVelocity` writes) at your
+walkspeed, steering straight at home and stopping within `ARRIVE` studs. If a ledge or
+wall stalls it, it jumps. It pauses while you're ragdolled or knocked.
+
+Run it **while standing at your base** - that spot becomes home (or set `HOME`).
+`SPEED = 0` follows your `Humanoid.WalkSpeed`; set a number to walk back faster.
